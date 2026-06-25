@@ -52,7 +52,11 @@ typedef enum {
     TYPE_UNORDERED_LIST_ITEM,
     TYPE_ORDERED_LIST_ITEM,
     TYPE_EMPTY, // For actual empty lines
-    TYPE_CODE_BLOCK_CONTENT
+    TYPE_CODE_BLOCK_CONTENT,
+    TYPE_BLOCKQUOTE,
+    TYPE_HORIZONTAL_RULE,
+    TYPE_TASK_LIST_ITEM_UNCHECKED,
+    TYPE_TASK_LIST_ITEM_CHECKED
 } LineType;
 
 typedef struct {
@@ -133,57 +137,85 @@ int get_raw_indentation_level(const char *line) {
     return indent;
 }
 
-// Function to print text, applying bold formatting for **text**
 void print_formatted_text(const char *text, const char *initial_color_code, const char *reset_color_code) {
     char *current = (char *)text;
-    char *bold_start;
-    char *bold_end;
-    char *code_start;
-    char *code_end;
-
-    printf("%s", initial_color_code); // Apply initial color for the whole line
+    printf("%s", initial_color_code);
 
     while (*current != '\0') {
-        bold_start = strstr(current, "**");
-        code_start = strchr(current, '`');
-
-        if (bold_start == NULL && code_start == NULL) {
-            printf("%s", current);
-            break;
-        }
-
-        if (code_start != NULL && (bold_start == NULL || code_start < bold_start)) {
-            // Inline code comes first
-            *code_start = '\0';
-            printf("%s", current);
-            *code_start = '`';
-
-            code_end = strchr(code_start + 1, '`');
-            if (code_end == NULL) {
-                printf("%s", code_start);
-                break;
+        if (*current == '\\' && *(current + 1) != '\0') {
+            printf("%c", *(current + 1));
+            current += 2;
+        } else if (*current == '`') {
+            char *end = strchr(current + 1, '`');
+            if (end) {
+                *end = '\0';
+                printf("%s%s%s", COLOR_BRIGHT_CYAN, current + 1, initial_color_code);
+                *end = '`';
+                current = end + 1;
+            } else {
+                printf("`");
+                current++;
             }
-
-            *code_end = '\0';
-            printf("%s%s%s", COLOR_BRIGHT_CYAN, code_start + 1, initial_color_code);
-            *code_end = '`';
-            current = code_end + 1;
+        } else if (strncmp(current, "**", 2) == 0) {
+            char *end = strstr(current + 2, "**");
+            if (end) {
+                *end = '\0';
+                char new_color[128];
+                snprintf(new_color, sizeof(new_color), "%s%s", initial_color_code, COLOR_BOLD);
+                print_formatted_text(current + 2, new_color, "");
+                *end = '*';
+                printf("\033[22m%s", initial_color_code); // 22m resets bold/dim
+                current = end + 2;
+            } else {
+                printf("**");
+                current += 2;
+            }
+        } else if (strncmp(current, "~~", 2) == 0) {
+            char *end = strstr(current + 2, "~~");
+            if (end) {
+                *end = '\0';
+                char new_color[128];
+                snprintf(new_color, sizeof(new_color), "%s\033[9m", initial_color_code);
+                print_formatted_text(current + 2, new_color, "");
+                *end = '~';
+                printf("\033[29m%s", initial_color_code); // 29m resets strikethrough
+                current = end + 2;
+            } else {
+                printf("~~");
+                current += 2;
+            }
+        } else if (*current == '*' || *current == '_') {
+            char marker = *current;
+            char *end = current + 1;
+            bool found = false;
+            while (*end != '\0') {
+                if (*end == marker) {
+                    // skip double markers
+                    if (marker == '*' && *(end + 1) == '*') {
+                        end += 2;
+                        continue;
+                    }
+                    found = true;
+                    break;
+                }
+                if (*end == '\\' && *(end + 1) != '\0') end++; // skip escaped
+                end++;
+            }
+            if (found) {
+                *end = '\0';
+                char new_color[128];
+                snprintf(new_color, sizeof(new_color), "%s\033[3m", initial_color_code);
+                print_formatted_text(current + 1, new_color, "");
+                *end = marker;
+                printf("\033[23m%s", initial_color_code); // 23m resets italic
+                current = end + 1;
+            } else {
+                printf("%c", marker);
+                current++;
+            }
         } else {
-            // Bold comes first
-            *bold_start = '\0';
-            printf("%s", current);
-            *bold_start = '*';
-
-            bold_end = strstr(bold_start + 2, "**");
-            if (bold_end == NULL) {
-                printf("%s", bold_start);
-                break;
-            }
-
-            *bold_end = '\0';
-            printf("%s%s%s", COLOR_BOLD, bold_start + 2, initial_color_code);
-            *bold_end = '*';
-            current = bold_end + 2;
+            printf("%c", *current);
+            current++;
         }
     }
     printf("%s", reset_color_code);
@@ -294,31 +326,64 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        // Setext Headings
-        if (len > 0 && (trimmed_line[0] == '=' || trimmed_line[0] == '-')) {
-            bool is_setext = true;
+        // Setext Headings and Horizontal Rules
+        if (len > 0 && (trimmed_line[0] == '=' || trimmed_line[0] == '-' || trimmed_line[0] == '*' || trimmed_line[0] == '_')) {
+            bool is_uniform = true;
             char marker = trimmed_line[0];
+            int count = 1;
             for (int i = 1; i < strlen(trimmed_line); i++) {
-                if (trimmed_line[i] != marker) {
-                    is_setext = false;
+                if (trimmed_line[i] != ' ' && trimmed_line[i] != marker) {
+                    is_uniform = false;
                     break;
                 }
+                if (trimmed_line[i] == marker) count++;
             }
-            if (is_setext && prev_line_idx != -1 && lines_data[prev_line_idx].type == TYPE_CONTENT) {
-                int heading_level = (marker == '=') ? 1 : 2;
-                lines_data[prev_line_idx].type = TYPE_HEADING;
-                lines_data[prev_line_idx].level = heading_level;
-                prev_line_idx = -1;
-                prev_line_type = TYPE_EMPTY; 
-                continue;
+            
+            if (is_uniform) {
+                if ((marker == '=' || marker == '-') && prev_line_idx != -1 && lines_data[prev_line_idx].type == TYPE_CONTENT) {
+                    int heading_level = (marker == '=') ? 1 : 2;
+                    lines_data[prev_line_idx].type = TYPE_HEADING;
+                    lines_data[prev_line_idx].level = heading_level;
+                    prev_line_idx = -1;
+                    prev_line_type = TYPE_EMPTY; 
+                    continue;
+                } else if (count >= 3 && (marker == '-' || marker == '*' || marker == '_')) {
+                    add_parsed_line(TYPE_HORIZONTAL_RULE, raw_current_indent, "", 0);
+                    prev_line_type = TYPE_HORIZONTAL_RULE;
+                    prev_line_idx = num_lines - 1;
+                    continue;
+                }
             }
+        }
+
+        // Blockquotes
+        if (len > 0 && trimmed_line[0] == '>') {
+            int quote_indent = 1;
+            while (trimmed_line[quote_indent] == '>') quote_indent++;
+            if (trimmed_line[quote_indent] == ' ') quote_indent++;
+            add_parsed_line(TYPE_BLOCKQUOTE, raw_current_indent, trimmed_line + quote_indent, 0);
+            prev_line_type = TYPE_BLOCKQUOTE;
+            prev_line_idx = num_lines - 1;
+            continue;
         }
 
         // Unordered List Items: *, -, or + followed by a space
         if (len > 0 && (trimmed_line[0] == '*' || trimmed_line[0] == '-' || trimmed_line[0] == '+') &&
             (strlen(trimmed_line) > 1 && trimmed_line[1] == ' ')) {
-            add_parsed_line(TYPE_UNORDERED_LIST_ITEM, raw_current_indent, trimmed_line + 2, 0); // Store raw indent
-            prev_line_type = TYPE_UNORDERED_LIST_ITEM;
+            
+            char *list_content = trimmed_line + 2;
+            LineType item_type = TYPE_UNORDERED_LIST_ITEM;
+
+            if (strncmp(list_content, "[ ] ", 4) == 0) {
+                item_type = TYPE_TASK_LIST_ITEM_UNCHECKED;
+                list_content += 4;
+            } else if (strncmp(list_content, "[x] ", 4) == 0 || strncmp(list_content, "[X] ", 4) == 0) {
+                item_type = TYPE_TASK_LIST_ITEM_CHECKED;
+                list_content += 4;
+            }
+
+            add_parsed_line(item_type, raw_current_indent, list_content, 0); // Store raw indent
+            prev_line_type = item_type;
             prev_line_idx = num_lines - 1;
             continue;
         }
@@ -479,8 +544,9 @@ int main(int argc, char *argv[]) {
                 if (next_line->type == TYPE_HEADING && next_line->level <= parent_heading_level) {
                     break; // Reached end of parent scope
                 }
-                if (next_line->type == TYPE_CONTENT || next_line->type == TYPE_CODE_BLOCK_CONTENT) {
-                    // Only a normal line or code block causes the vertical line to continue
+                if (next_line->type == TYPE_CONTENT || next_line->type == TYPE_CODE_BLOCK_CONTENT || 
+                    next_line->type == TYPE_BLOCKQUOTE || next_line->type == TYPE_HORIZONTAL_RULE) {
+                    // Only a normal line, code block, blockquote, or HR causes the vertical line to continue
                     is_last_child = false;
                     break;
                 }
@@ -489,7 +555,8 @@ int main(int argc, char *argv[]) {
             // Add list indentation
             int current_raw_indent_blocks = current_line->level / 4;
             
-            if (current_line->type == TYPE_CONTENT || current_line->type == TYPE_CODE_BLOCK_CONTENT) {
+            if (current_line->type == TYPE_CONTENT || current_line->type == TYPE_CODE_BLOCK_CONTENT ||
+                current_line->type == TYPE_BLOCKQUOTE || current_line->type == TYPE_HORIZONTAL_RULE) {
                 char base_prefix[MAX_LINE_LENGTH];
                 strcpy(base_prefix, prefix);
 
@@ -542,12 +609,20 @@ int main(int argc, char *argv[]) {
                             }
                         }
                     }
+                } else if (current_line->type == TYPE_BLOCKQUOTE) {
+                    printf("%s%s> %s", prefix, COLOR_DIM, COLOR_RESET);
+                    print_formatted_text(current_line->text, COLOR_BRIGHT_GREEN, COLOR_RESET);
+                    printf("\n");
+                } else if (current_line->type == TYPE_HORIZONTAL_RULE) {
+                    printf("%s%s──────────%s\n", prefix, COLOR_DIM, COLOR_RESET);
                 } else {
                     printf("%s", prefix); 
                     print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET);
                     printf("\n");
                 }
-            } else if (current_line->type == TYPE_UNORDERED_LIST_ITEM) {
+            } else if (current_line->type == TYPE_UNORDERED_LIST_ITEM || 
+                       current_line->type == TYPE_TASK_LIST_ITEM_UNCHECKED || 
+                       current_line->type == TYPE_TASK_LIST_ITEM_CHECKED) {
                 // List items have no tree connectors, but need the vertical line if not the last child
                 if (is_last_child) {
                     strcat(prefix, INDENT_STR);
@@ -557,8 +632,17 @@ int main(int argc, char *argv[]) {
                 for (int j = 0; j < current_raw_indent_blocks; j++) {
                     strcat(prefix, INDENT_STR);
                 }
-                printf("%s%s", prefix, BULLET_POINT); 
-                print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
+                
+                if (current_line->type == TYPE_TASK_LIST_ITEM_CHECKED) {
+                    printf("%s%s[%s✓%s] ", prefix, COLOR_DIM, COLOR_BRIGHT_GREEN, COLOR_DIM);
+                    print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
+                } else if (current_line->type == TYPE_TASK_LIST_ITEM_UNCHECKED) {
+                    printf("%s%s[ ] %s", prefix, COLOR_DIM, COLOR_RESET);
+                    print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
+                } else {
+                    printf("%s%s", prefix, BULLET_POINT); 
+                    print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
+                }
                 printf("\n");
             } else if (current_line->type == TYPE_ORDERED_LIST_ITEM) {
                 if (is_last_child) {
