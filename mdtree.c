@@ -290,8 +290,17 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        // Check if trimmed_line is actually empty
+        bool is_empty = true;
+        for (int i = 0; trimmed_line[i] != '\0'; i++) {
+            if (!isspace((unsigned char)trimmed_line[i])) {
+                is_empty = false;
+                break;
+            }
+        }
+
         // Regular content or empty line
-        if (len > 0) {
+        if (!is_empty) {
             add_parsed_line(TYPE_CONTENT, raw_current_indent, line_buffer, 0); // Store content with its raw indent
             prev_line_type = TYPE_CONTENT;
             prev_line_idx = num_lines - 1;
@@ -342,9 +351,13 @@ int main(int argc, char *argv[]) {
             is_last_sibling_in_current_scope = true;
             for (int k = i + 1; k < num_lines; k++) {
                 ParsedLine *next_line = &lines_data[k];
-                if (next_line->type == TYPE_HEADING && next_line->level <= current_line->level) {
-                    is_last_sibling_in_current_scope = false;
-                    break;
+                if (next_line->type == TYPE_HEADING) {
+                    if (next_line->level == current_line->level) {
+                        is_last_sibling_in_current_scope = false;
+                        break;
+                    } else if (next_line->level < current_line->level) {
+                        break; // Scope ended, so it is the last sibling
+                    }
                 }
             }
             
@@ -440,8 +453,12 @@ int main(int argc, char *argv[]) {
                 print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET);
                 printf("\n");
             } else if (current_line->type == TYPE_UNORDERED_LIST_ITEM) {
-                // List items have no tree connectors, just indent
-                strcat(prefix, INDENT_STR); // 1 extra indent relative to heading
+                // List items have no tree connectors, but need the vertical line if not the last child
+                if (is_last_child) {
+                    strcat(prefix, INDENT_STR);
+                } else {
+                    strcat(prefix, PIPE_STR);
+                }
                 for (int j = 0; j < current_raw_indent_blocks; j++) {
                     strcat(prefix, INDENT_STR);
                 }
@@ -449,7 +466,11 @@ int main(int argc, char *argv[]) {
                 print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
                 printf("\n");
             } else if (current_line->type == TYPE_ORDERED_LIST_ITEM) {
-                strcat(prefix, INDENT_STR); // 1 extra indent relative to heading
+                if (is_last_child) {
+                    strcat(prefix, INDENT_STR);
+                } else {
+                    strcat(prefix, PIPE_STR);
+                }
                 for (int j = 0; j < current_raw_indent_blocks; j++) {
                     strcat(prefix, INDENT_STR);
                 }
