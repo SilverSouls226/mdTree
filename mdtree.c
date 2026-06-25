@@ -196,8 +196,13 @@ int main(int argc, char *argv[]) {
     int max_level_filter = MAX_AWK_LEVEL;
     const char *md_file_path = NULL;
     int opt;
+    int option_index = 0;
+    static struct option long_options[] = {
+        {"help", no_argument, 0,  'h' },
+        {0,      0,           0,   0  }
+    };
 
-    while ((opt = getopt(argc, argv, "L:h")) != -1) {
+    while ((opt = getopt_long(argc, argv, "L:h", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'L':
                 max_level_filter = atoi(optarg);
