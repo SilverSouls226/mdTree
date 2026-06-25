@@ -422,15 +422,15 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            // Check if this item is the last non-empty child in its parent scope
+            // Check if this item is the last child in its parent scope that requires extending the line
             bool is_last_child = true;
             for (int k = i + 1; k < num_lines; k++) {
                 ParsedLine *next_line = &lines_data[k];
                 if (next_line->type == TYPE_HEADING && next_line->level <= parent_heading_level) {
                     break; // Reached end of parent scope
                 }
-                if (next_line->type != TYPE_EMPTY) {
-                    // There is another item in this scope, so we are not the last
+                if (next_line->type == TYPE_CONTENT) {
+                    // Only a normal line (TYPE_CONTENT) causes the vertical line to continue
                     is_last_child = false;
                     break;
                 }
