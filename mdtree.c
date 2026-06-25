@@ -51,7 +51,8 @@ typedef enum {
     TYPE_CONTENT,
     TYPE_UNORDERED_LIST_ITEM,
     TYPE_ORDERED_LIST_ITEM,
-    TYPE_EMPTY // For actual empty lines
+    TYPE_EMPTY, // For actual empty lines
+    TYPE_CODE_BLOCK_CONTENT
 } LineType;
 
 typedef struct {
@@ -137,37 +138,55 @@ void print_formatted_text(const char *text, const char *initial_color_code, cons
     char *current = (char *)text;
     char *bold_start;
     char *bold_end;
+    char *code_start;
+    char *code_end;
 
     printf("%s", initial_color_code); // Apply initial color for the whole line
 
     while (*current != '\0') {
         bold_start = strstr(current, "**");
-        if (bold_start == NULL) {
-            // No more bold markers, print the rest of the string
+        code_start = strchr(current, '`');
+
+        if (bold_start == NULL && code_start == NULL) {
             printf("%s", current);
             break;
         }
 
-        // Print text before the bold marker
-        *bold_start = '\0'; // Temporarily null-terminate to print segment
-        printf("%s", current);
-        *bold_start = '*'; // Restore for next search if needed (though not strictly necessary here)
+        if (code_start != NULL && (bold_start == NULL || code_start < bold_start)) {
+            // Inline code comes first
+            *code_start = '\0';
+            printf("%s", current);
+            *code_start = '`';
 
-        bold_end = strstr(bold_start + 2, "**");
-        if (bold_end == NULL) {
-            // Unmatched bold marker, print the rest as regular text
-            printf("%s", bold_start);
-            break;
+            code_end = strchr(code_start + 1, '`');
+            if (code_end == NULL) {
+                printf("%s", code_start);
+                break;
+            }
+
+            *code_end = '\0';
+            printf("%s%s%s", COLOR_BRIGHT_CYAN, code_start + 1, initial_color_code);
+            *code_end = '`';
+            current = code_end + 1;
+        } else {
+            // Bold comes first
+            *bold_start = '\0';
+            printf("%s", current);
+            *bold_start = '*';
+
+            bold_end = strstr(bold_start + 2, "**");
+            if (bold_end == NULL) {
+                printf("%s", bold_start);
+                break;
+            }
+
+            *bold_end = '\0';
+            printf("%s%s%s", COLOR_BOLD, bold_start + 2, initial_color_code);
+            *bold_end = '*';
+            current = bold_end + 2;
         }
-
-        // Print bold text
-        *bold_end = '\0'; // Temporarily null-terminate for bold segment
-        printf("%s%s%s%s", COLOR_BOLD, bold_start + 2, initial_color_code, bold_end); // Bold, then restore initial color
-        *bold_end = '*'; // Restore
-
-        current = bold_end + 2;
     }
-    printf("%s", reset_color_code); // Ensure reset at the end
+    printf("%s", reset_color_code);
 }
 
 
@@ -221,6 +240,7 @@ int main(int argc, char *argv[]) {
     char line_buffer[MAX_LINE_LENGTH];
     LineType prev_line_type = TYPE_EMPTY;
     int prev_line_idx = -1;
+    bool in_code_block = false;
 
     // --- First Pass: Parse file and store data ---
     while (fgets(line_buffer, sizeof(line_buffer), fp) != NULL) {
@@ -229,6 +249,19 @@ int main(int argc, char *argv[]) {
         
         int raw_current_indent = get_raw_indentation_level(line_buffer);
         char *trimmed_line = line_buffer + raw_current_indent; // Pointer to the actual text after initial indent
+
+        // Check for code block fences
+        if (strncmp(trimmed_line, "```", 3) == 0) {
+            in_code_block = !in_code_block;
+            continue; // Do not render the backticks themselves
+        }
+
+        if (in_code_block) {
+            add_parsed_line(TYPE_CODE_BLOCK_CONTENT, raw_current_indent, line_buffer, 0); // Keep raw leading spaces of the line buffer for code content
+            prev_line_type = TYPE_CODE_BLOCK_CONTENT;
+            prev_line_idx = num_lines - 1;
+            continue;
+        }
 
         // ATX Headings
         if (len > 0 && trimmed_line[0] == '#') {
@@ -429,8 +462,8 @@ int main(int argc, char *argv[]) {
                 if (next_line->type == TYPE_HEADING && next_line->level <= parent_heading_level) {
                     break; // Reached end of parent scope
                 }
-                if (next_line->type == TYPE_CONTENT) {
-                    // Only a normal line (TYPE_CONTENT) causes the vertical line to continue
+                if (next_line->type == TYPE_CONTENT || next_line->type == TYPE_CODE_BLOCK_CONTENT) {
+                    // Only a normal line or code block causes the vertical line to continue
                     is_last_child = false;
                     break;
                 }
@@ -439,7 +472,7 @@ int main(int argc, char *argv[]) {
             // Add list indentation
             int current_raw_indent_blocks = current_line->level / 4;
             
-            if (current_line->type == TYPE_CONTENT) {
+            if (current_line->type == TYPE_CONTENT || current_line->type == TYPE_CODE_BLOCK_CONTENT) {
                 if (is_last_child) {
                     strcat(prefix, ELBOW_STR);
                 } else {
@@ -450,8 +483,13 @@ int main(int argc, char *argv[]) {
                     strcat(prefix, INDENT_STR);
                 }
                 printf("%s", prefix); 
-                print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET);
-                printf("\n");
+                if (current_line->type == TYPE_CODE_BLOCK_CONTENT) {
+                    // Do not parse **bold** etc. inside code blocks
+                    printf("%s%s%s\n", COLOR_CYAN, current_line->text, COLOR_RESET);
+                } else {
+                    print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET);
+                    printf("\n");
+                }
             } else if (current_line->type == TYPE_UNORDERED_LIST_ITEM) {
                 // List items have no tree connectors, but need the vertical line if not the last child
                 if (is_last_child) {
