@@ -253,13 +253,25 @@ int main(int argc, char *argv[]) {
         // Check for code block fences
         if (strncmp(trimmed_line, "```", 3) == 0) {
             in_code_block = !in_code_block;
+            if (in_code_block) {
+                // Starting a new code block, add an empty ParsedLine for it
+                add_parsed_line(TYPE_CODE_BLOCK_CONTENT, raw_current_indent, "", 0);
+            }
             continue; // Do not render the backticks themselves
         }
 
         if (in_code_block) {
-            add_parsed_line(TYPE_CODE_BLOCK_CONTENT, raw_current_indent, line_buffer, 0); // Keep raw leading spaces of the line buffer for code content
-            prev_line_type = TYPE_CODE_BLOCK_CONTENT;
-            prev_line_idx = num_lines - 1;
+            ParsedLine *last_line = &lines_data[num_lines - 1];
+            int old_len = strlen(last_line->text);
+            int new_len = old_len + strlen(line_buffer) + 2; // +1 for \n, +1 for \0
+            char *new_text = malloc(new_len);
+            strcpy(new_text, last_line->text);
+            if (old_len > 0) {
+                strcat(new_text, "\n");
+            }
+            strcat(new_text, line_buffer);
+            free(last_line->text);
+            last_line->text = new_text;
             continue;
         }
 
@@ -473,6 +485,9 @@ int main(int argc, char *argv[]) {
             int current_raw_indent_blocks = current_line->level / 4;
             
             if (current_line->type == TYPE_CONTENT || current_line->type == TYPE_CODE_BLOCK_CONTENT) {
+                char base_prefix[MAX_LINE_LENGTH];
+                strcpy(base_prefix, prefix);
+
                 if (is_last_child) {
                     strcat(prefix, ELBOW_STR);
                 } else {
@@ -482,11 +497,48 @@ int main(int argc, char *argv[]) {
                 for (int j = 0; j < current_raw_indent_blocks; j++) {
                     strcat(prefix, INDENT_STR);
                 }
-                printf("%s", prefix); 
+                
                 if (current_line->type == TYPE_CODE_BLOCK_CONTENT) {
-                    // Do not parse **bold** etc. inside code blocks
-                    printf("%s%s%s\n", COLOR_CYAN, current_line->text, COLOR_RESET);
+                    char subsequent_prefix[MAX_LINE_LENGTH];
+                    strcpy(subsequent_prefix, base_prefix);
+                    if (is_last_child) {
+                        strcat(subsequent_prefix, INDENT_STR);
+                    } else {
+                        strcat(subsequent_prefix, PIPE_STR);
+                    }
+                    for (int j = 0; j < current_raw_indent_blocks; j++) {
+                        strcat(subsequent_prefix, INDENT_STR);
+                    }
+
+                    printf("%s", prefix);
+                    char *code_text = current_line->text;
+                    char *newline_pos;
+                    bool first_line = true;
+                    
+                    if (code_text[0] == '\0') {
+                        printf("%s%s\n", COLOR_CYAN, COLOR_RESET);
+                    } else {
+                        while ((newline_pos = strchr(code_text, '\n')) != NULL) {
+                            *newline_pos = '\0';
+                            if (first_line) {
+                                printf("%s%s%s\n", COLOR_CYAN, code_text, COLOR_RESET);
+                                first_line = false;
+                            } else {
+                                printf("%s%s%s%s\n", subsequent_prefix, COLOR_CYAN, code_text, COLOR_RESET);
+                            }
+                            *newline_pos = '\n';
+                            code_text = newline_pos + 1;
+                        }
+                        if (*code_text != '\0' || !first_line) {
+                            if (first_line) {
+                                printf("%s%s%s\n", COLOR_CYAN, code_text, COLOR_RESET);
+                            } else if (*code_text != '\0') {
+                                printf("%s%s%s%s\n", subsequent_prefix, COLOR_CYAN, code_text, COLOR_RESET);
+                            }
+                        }
+                    }
                 } else {
+                    printf("%s", prefix); 
                     print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET);
                     printf("\n");
                 }
