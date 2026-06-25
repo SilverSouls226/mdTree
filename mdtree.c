@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <getopt.h>
+#include <ctype.h> // For isdigit()
 
 // --- Constants and Symbols ---
 #define MAX_LINE_LENGTH 2048
@@ -14,8 +15,10 @@ const char *ELBOW_STR = "└── ";
 const char *TEE_STR = "├── ";
 const char *INDENT_STR = "    ";
 
+// Unicode bullet point character
+const char *BULLET_POINT = "• "; // Note the space after for formatting
+
 // --- ANSI Color Codes ---
-// Define your desired color scheme here
 #define COLOR_RESET       "\033[0m"
 #define COLOR_BOLD        "\033[1m"
 #define COLOR_DIM         "\033[2m"
@@ -32,27 +35,30 @@ const char *INDENT_STR = "    ";
 #define COLOR_WHITE       "\033[37m"
 
 // Bright foreground colors
-#define COLOR_BRIGHT_BLACK  "\033[90m"
+#define COLOR_BRIGHT_BLACK  "\033[90m" // Dark grey
 #define COLOR_BRIGHT_RED    "\033[91m"
 #define COLOR_BRIGHT_GREEN  "\033[92m"
 #define COLOR_BRIGHT_YELLOW "\033[93m"
 #define COLOR_BRIGHT_BLUE   "\033[94m"
 #define COLOR_BRIGHT_MAGENTA "\033[95m"
 #define COLOR_BRIGHT_CYAN   "\033[96m"
-#define COLOR_BRIGHT_WHITE  "\033[97m"
+#define COLOR_BRIGHT_WHITE  "\033[97m" // Lighter white/grey
 
 
 // --- Data Structures ---
 typedef enum {
     TYPE_HEADING,
     TYPE_CONTENT,
-    TYPE_EMPTY
+    TYPE_UNORDERED_LIST_ITEM,
+    TYPE_ORDERED_LIST_ITEM,
+    TYPE_EMPTY // For actual empty lines
 } LineType;
 
 typedef struct {
     LineType type;
-    int level; // 1-6 for headings, 0 for content/empty
+    int level; // 1-6 for headings, 0 for content/empty, raw indentation level for lists
     char *text; // Dynamically allocated string for the line content
+    int list_number; // Only used for TYPE_ORDERED_LIST_ITEM
 } ParsedLine;
 
 // Dynamic array for ParsedLine structs
@@ -81,7 +87,7 @@ void display_help() {
 }
 
 // Function to add a parsed line to our dynamic array
-void add_parsed_line(LineType type, int level, const char *text) {
+void add_parsed_line(LineType type, int level, const char *text, int list_number) {
     if (num_lines >= capacity_lines) {
         capacity_lines = (capacity_lines == 0) ? 100 : capacity_lines * 2;
         ParsedLine *new_lines_data = realloc(lines_data, capacity_lines * sizeof(ParsedLine));
@@ -98,6 +104,7 @@ void add_parsed_line(LineType type, int level, const char *text) {
         perror("Failed to duplicate string for parsed line");
         exit(EXIT_FAILURE);
     }
+    lines_data[num_lines].list_number = list_number;
     num_lines++;
 }
 
@@ -109,14 +116,68 @@ void cleanup() {
     free(lines_data);
 }
 
+// Function to determine the indentation level of a line (leading spaces/tabs)
+// Returns the number of leading spaces. Tabs are counted as 4 spaces.
+int get_raw_indentation_level(const char *line) {
+    int indent = 0;
+    for (int i = 0; line[i] != '\0'; i++) {
+        if (line[i] == ' ') {
+            indent++;
+        } else if (line[i] == '\t') {
+            indent += 4; // Assume tab is 4 spaces for indentation
+        } else {
+            break;
+        }
+    }
+    return indent;
+}
+
+// Function to print text, applying bold formatting for **text**
+void print_formatted_text(const char *text, const char *initial_color_code, const char *reset_color_code) {
+    char *current = (char *)text;
+    char *bold_start;
+    char *bold_end;
+
+    printf("%s", initial_color_code); // Apply initial color for the whole line
+
+    while (*current != '\0') {
+        bold_start = strstr(current, "**");
+        if (bold_start == NULL) {
+            // No more bold markers, print the rest of the string
+            printf("%s", current);
+            break;
+        }
+
+        // Print text before the bold marker
+        *bold_start = '\0'; // Temporarily null-terminate to print segment
+        printf("%s", current);
+        *bold_start = '*'; // Restore for next search if needed (though not strictly necessary here)
+
+        bold_end = strstr(bold_start + 2, "**");
+        if (bold_end == NULL) {
+            // Unmatched bold marker, print the rest as regular text
+            printf("%s", bold_start);
+            break;
+        }
+
+        // Print bold text
+        *bold_end = '\0'; // Temporarily null-terminate for bold segment
+        printf("%s%s%s%s", COLOR_BOLD, bold_start + 2, initial_color_code, bold_end); // Bold, then restore initial color
+        *bold_end = '*'; // Restore
+
+        current = bold_end + 2;
+    }
+    printf("%s", reset_color_code); // Ensure reset at the end
+}
+
+
 // --- Main Logic ---
 
 int main(int argc, char *argv[]) {
-    int max_level_filter = MAX_AWK_LEVEL; // Default to show all headings and text
+    int max_level_filter = MAX_AWK_LEVEL;
     const char *md_file_path = NULL;
     int opt;
 
-    // Use getopt for command-line options
     while ((opt = getopt(argc, argv, "L:h")) != -1) {
         switch (opt) {
             case 'L':
@@ -130,18 +191,17 @@ int main(int argc, char *argv[]) {
             case 'h':
                 display_help();
                 return EXIT_SUCCESS;
-            case '?': // Unknown option
+            case '?':
                 fprintf(stderr, "Error: Unknown option '-%c'.\n", optopt);
                 display_help();
                 return EXIT_FAILURE;
-            case ':': // Missing argument for an option
+            case ':':
                 fprintf(stderr, "Error: Option '-%c' requires an argument.\n", optopt);
                 display_help();
                 return EXIT_FAILURE;
         }
     }
 
-    // Remaining argument should be the Markdown file path
     if (optind < argc) {
         md_file_path = argv[optind];
     } else {
@@ -156,67 +216,88 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    atexit(cleanup); // Register cleanup function to free memory on exit
+    atexit(cleanup);
 
     char line_buffer[MAX_LINE_LENGTH];
     LineType prev_line_type = TYPE_EMPTY;
-    int prev_line_idx = -1; // Index of the previous line added to lines_data
+    int prev_line_idx = -1;
 
     // --- First Pass: Parse file and store data ---
     while (fgets(line_buffer, sizeof(line_buffer), fp) != NULL) {
-        // Remove trailing newline character
         line_buffer[strcspn(line_buffer, "\n")] = 0;
-
         int len = strlen(line_buffer);
+        
+        int raw_current_indent = get_raw_indentation_level(line_buffer);
+        char *trimmed_line = line_buffer + raw_current_indent; // Pointer to the actual text after initial indent
 
-        // ATX Headings: # Heading
-        if (len > 0 && line_buffer[0] == '#') {
+        // ATX Headings
+        if (len > 0 && trimmed_line[0] == '#') {
             int level = 0;
-            while (level < len && line_buffer[level] == '#') {
+            while (level < strlen(trimmed_line) && trimmed_line[level] == '#') {
                 level++;
             }
-            if (level > 0 && level <= MAX_HEADING_LEVEL && (line_buffer[level] == ' ' || line_buffer[level] == '\0')) {
-                // Valid ATX heading
-                add_parsed_line(TYPE_HEADING, level, line_buffer + level + (line_buffer[level] == ' ' ? 1 : 0));
+            if (level > 0 && level <= MAX_HEADING_LEVEL && (trimmed_line[level] == ' ' || trimmed_line[level] == '\0')) {
+                add_parsed_line(TYPE_HEADING, level, trimmed_line + level + (trimmed_line[level] == ' ' ? 1 : 0), 0);
                 prev_line_type = TYPE_HEADING;
                 prev_line_idx = num_lines - 1;
                 continue;
             }
         }
 
-        // Setext Headings: === or ---
-        if (len > 0 && (line_buffer[0] == '=' || line_buffer[0] == '-')) {
+        // Setext Headings
+        if (len > 0 && (trimmed_line[0] == '=' || trimmed_line[0] == '-')) {
             bool is_setext = true;
-            char marker = line_buffer[0];
-            for (int i = 1; i < len; i++) {
-                if (line_buffer[i] != marker) {
+            char marker = trimmed_line[0];
+            for (int i = 1; i < strlen(trimmed_line); i++) {
+                if (trimmed_line[i] != marker) {
                     is_setext = false;
                     break;
                 }
             }
-
             if (is_setext && prev_line_idx != -1 && lines_data[prev_line_idx].type == TYPE_CONTENT) {
-                // We found a Setext marker and the previous line was content
-                // Convert the previous CONTENT line to a HEADING
                 int heading_level = (marker == '=') ? 1 : 2;
                 lines_data[prev_line_idx].type = TYPE_HEADING;
                 lines_data[prev_line_idx].level = heading_level;
-                // Don't track this marker line itself in prev_line_idx or type
                 prev_line_idx = -1;
                 prev_line_type = TYPE_EMPTY; 
                 continue;
             }
         }
 
+        // Unordered List Items: *, -, or + followed by a space
+        if (len > 0 && (trimmed_line[0] == '*' || trimmed_line[0] == '-' || trimmed_line[0] == '+') &&
+            (strlen(trimmed_line) > 1 && trimmed_line[1] == ' ')) {
+            add_parsed_line(TYPE_UNORDERED_LIST_ITEM, raw_current_indent, trimmed_line + 2, 0); // Store raw indent
+            prev_line_type = TYPE_UNORDERED_LIST_ITEM;
+            prev_line_idx = num_lines - 1;
+            continue;
+        }
+
+        // Ordered List Items: Number followed by . and a space
+        if (len > 0 && isdigit(trimmed_line[0])) {
+            int i = 0;
+            int list_num = 0;
+            while (i < strlen(trimmed_line) && isdigit(trimmed_line[i])) {
+                list_num = list_num * 10 + (trimmed_line[i] - '0');
+                i++;
+            }
+            if (i > 0 && i < strlen(trimmed_line) && trimmed_line[i] == '.' && 
+                (strlen(trimmed_line) > i + 1 && trimmed_line[i+1] == ' ')) {
+                add_parsed_line(TYPE_ORDERED_LIST_ITEM, raw_current_indent, trimmed_line + i + 2, list_num); // Store raw indent
+                prev_line_type = TYPE_ORDERED_LIST_ITEM;
+                prev_line_idx = num_lines - 1;
+                continue;
+            }
+        }
+
         // Regular content or empty line
         if (len > 0) {
-            add_parsed_line(TYPE_CONTENT, 0, line_buffer);
+            add_parsed_line(TYPE_CONTENT, raw_current_indent, line_buffer, 0); // Store content with its raw indent
             prev_line_type = TYPE_CONTENT;
             prev_line_idx = num_lines - 1;
         } else {
-            // An actual empty line. Only store if MAX_AWK_LEVEL is enabled
             if (max_level_filter == MAX_AWK_LEVEL) {
-                 add_parsed_line(TYPE_EMPTY, 0, "");
+                 add_parsed_line(TYPE_EMPTY, 0, "", 0);
                  prev_line_type = TYPE_EMPTY;
                  prev_line_idx = num_lines - 1;
             } else {
@@ -229,79 +310,81 @@ int main(int argc, char *argv[]) {
 
     // --- Second Pass: Print formatted output ---
 
-    bool last_sibling_status[MAX_HEADING_LEVEL + 1];
+    // last_sibling_status[level] is true if the item at 'level' is the last sibling,
+    // meaning subsequent items at higher levels (deeper indent) should use 'INDENT_STR' instead of 'PIPE_STR'
+    bool last_sibling_status[MAX_HEADING_LEVEL + 1]; 
     for (int i = 0; i <= MAX_HEADING_LEVEL; i++) {
         last_sibling_status[i] = false;
     }
-
+    
     for (int i = 0; i < num_lines; i++) {
         ParsedLine *current_line = &lines_data[i];
 
-        // Filter based on max_level_filter
+        char prefix[MAX_LINE_LENGTH] = "";
+        int current_logical_level = 0; // Represents the indentation level we are currently at (0-based)
+        bool is_last_sibling_in_current_scope = true;
+
+        // Filtering logic
         if (current_line->type == TYPE_HEADING && current_line->level > max_level_filter) {
             continue;
         }
-        // Content/Empty lines are only shown if MAX_AWK_LEVEL is active
-        if ((current_line->type == TYPE_CONTENT || current_line->type == TYPE_EMPTY) && max_level_filter != MAX_AWK_LEVEL) {
+        if ((current_line->type != TYPE_HEADING) && max_level_filter != MAX_AWK_LEVEL) {
             continue;
         }
-        // If it's an empty line (and not showing all content via MAX_AWK_LEVEL), skip it.
-        // Or if it's an empty line but it's not actually empty in terms of text (shouldn't happen now)
         if (current_line->type == TYPE_EMPTY && strlen(current_line->text) == 0 && max_level_filter != MAX_AWK_LEVEL) {
              continue; 
         }
 
-
-        char prefix[MAX_LINE_LENGTH] = "";
-        int current_level_indent = current_line->level - 1;
-
-        // Build the indentation prefix
-        for (int j = 0; j < current_level_indent; j++) {
-            if (last_sibling_status[j]) {
-                strcat(prefix, INDENT_STR);
-            } else {
-                strcat(prefix, PIPE_STR);
-            }
-        }
-
-        bool is_last_sibling = true;
         if (current_line->type == TYPE_HEADING) {
+            current_logical_level = current_line->level - 1;
+
+            // Determine if current heading is the last sibling at its level
+            is_last_sibling_in_current_scope = true;
             for (int k = i + 1; k < num_lines; k++) {
                 ParsedLine *next_line = &lines_data[k];
-                // Only consider other headings when determining last sibling for a heading
                 if (next_line->type == TYPE_HEADING && next_line->level <= current_line->level) {
-                    is_last_sibling = false;
+                    is_last_sibling_in_current_scope = false;
                     break;
                 }
             }
-        }
-        // For content/empty lines, their 'last sibling' status for prefix building is inherited from their parent heading
+            
+            // Build the prefix based on parent heading status
+            for (int j = 0; j < current_logical_level; j++) {
+                if (last_sibling_status[j]) {
+                    strcat(prefix, INDENT_STR);
+                } else {
+                    strcat(prefix, PIPE_STR);
+                }
+            }
 
-        if (current_line->type == TYPE_HEADING) {
-            last_sibling_status[current_level_indent] = is_last_sibling;
-
-            if (is_last_sibling) {
+            // Append current item's tree symbol
+            if (is_last_sibling_in_current_scope) {
                 strcat(prefix, ELBOW_STR);
             } else {
                 strcat(prefix, TEE_STR);
             }
             
+            printf("%s", prefix);
             // Apply colors based on heading level
             switch (current_line->level) {
-                case 1: printf("%s%s%s%s%s\n", prefix, COLOR_BOLD, COLOR_BRIGHT_YELLOW, current_line->text, COLOR_RESET); break;
-                case 2: printf("%s%s%s%s%s\n", prefix, COLOR_BOLD, COLOR_BRIGHT_CYAN, current_line->text, COLOR_RESET); break;
-                case 3: printf("%s%s%s%s%s\n", prefix, COLOR_GREEN, current_line->text, COLOR_RESET); break;
-                case 4: printf("%s%s%s%s\n", prefix, COLOR_MAGENTA, current_line->text, COLOR_RESET); break;
-                case 5: printf("%s%s%s%s\n", prefix, COLOR_BLUE, current_line->text, COLOR_RESET); break;
-                case 6: printf("%s%s%s%s\n", prefix, COLOR_RED, current_line->text, COLOR_RESET); break;
-                default: printf("%s%s\n", prefix, current_line->text); break; // Fallback
+                case 1: print_formatted_text(current_line->text, COLOR_BOLD COLOR_BRIGHT_YELLOW, COLOR_RESET); break;
+                case 2: print_formatted_text(current_line->text, COLOR_BOLD COLOR_BRIGHT_CYAN, COLOR_RESET); break;
+                case 3: print_formatted_text(current_line->text, COLOR_GREEN, COLOR_RESET); break;
+                case 4: print_formatted_text(current_line->text, COLOR_MAGENTA, COLOR_RESET); break;
+                case 5: print_formatted_text(current_line->text, COLOR_BLUE, COLOR_RESET); break;
+                case 6: print_formatted_text(current_line->text, COLOR_RED, COLOR_RESET); break;
+                default: print_formatted_text(current_line->text, COLOR_RESET, COLOR_RESET); break;
             }
+            printf("\n");
 
-            // Reset status for deeper levels
-            for (int j = current_level_indent + 1; j <= MAX_HEADING_LEVEL; j++) {
+            // Update last_sibling_status for the current level and reset deeper levels
+            last_sibling_status[current_logical_level] = is_last_sibling_in_current_scope;
+            for (int j = current_logical_level + 1; j <= MAX_HEADING_LEVEL; j++) {
                 last_sibling_status[j] = false;
             }
-        } else if (current_line->type == TYPE_CONTENT || current_line->type == TYPE_EMPTY) {
+
+        } else { // TYPE_UNORDERED_LIST_ITEM, TYPE_ORDERED_LIST_ITEM, TYPE_CONTENT, TYPE_EMPTY
+            // Find the closest preceding heading's level
             int parent_heading_level = 0;
             for (int k = i - 1; k >= 0; k--) {
                 ParsedLine *prev_line = &lines_data[k];
@@ -310,19 +393,80 @@ int main(int argc, char *argv[]) {
                     break;
                 }
             }
+            current_logical_level = parent_heading_level; // Base level for indentation
 
-            char content_prefix[MAX_LINE_LENGTH] = "";
-            for (int j = 0; j < parent_heading_level; j++) {
+            if (current_line->type == TYPE_EMPTY) {
+                // Ignore empty lines to prevent dangling lines extending
+                continue;
+            }
+
+            // Build base prefix based on parent heading status
+            for (int j = 0; j < current_logical_level; j++) {
                 if (last_sibling_status[j]) {
-                    strcat(content_prefix, INDENT_STR);
+                    strcat(prefix, INDENT_STR);
                 } else {
-                    strcat(content_prefix, PIPE_STR);
+                    strcat(prefix, PIPE_STR);
                 }
             }
-            strcat(content_prefix, INDENT_STR); 
+
+            // Check if this item is the last non-empty child in its parent scope
+            bool is_last_child = true;
+            for (int k = i + 1; k < num_lines; k++) {
+                ParsedLine *next_line = &lines_data[k];
+                if (next_line->type == TYPE_HEADING && next_line->level <= parent_heading_level) {
+                    break; // Reached end of parent scope
+                }
+                if (next_line->type != TYPE_EMPTY) {
+                    // There is another item in this scope, so we are not the last
+                    is_last_child = false;
+                    break;
+                }
+            }
+
+            // Add list indentation
+            int current_raw_indent_blocks = current_line->level / 4;
             
-            // Content can be just default color, or dimmed
-            printf("%s%s%s%s\n", content_prefix, COLOR_DIM, current_line->text, COLOR_RESET);
+            if (current_line->type == TYPE_CONTENT) {
+                if (is_last_child) {
+                    strcat(prefix, ELBOW_STR);
+                } else {
+                    strcat(prefix, TEE_STR);
+                }
+                // Add list item indentation spacing if content is nested inside list
+                for (int j = 0; j < current_raw_indent_blocks; j++) {
+                    strcat(prefix, INDENT_STR);
+                }
+                printf("%s", prefix); 
+                print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET);
+                printf("\n");
+            } else if (current_line->type == TYPE_UNORDERED_LIST_ITEM) {
+                // List items have no tree connectors, just indent
+                strcat(prefix, INDENT_STR); // 1 extra indent relative to heading
+                for (int j = 0; j < current_raw_indent_blocks; j++) {
+                    strcat(prefix, INDENT_STR);
+                }
+                printf("%s%s", prefix, BULLET_POINT); 
+                print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
+                printf("\n");
+            } else if (current_line->type == TYPE_ORDERED_LIST_ITEM) {
+                strcat(prefix, INDENT_STR); // 1 extra indent relative to heading
+                for (int j = 0; j < current_raw_indent_blocks; j++) {
+                    strcat(prefix, INDENT_STR);
+                }
+                printf("%s%s%d.%s ", prefix, COLOR_BRIGHT_BLUE, current_line->list_number, COLOR_RESET); 
+                print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
+                printf("\n");
+            }
+            
+            // Update last_sibling_status for content/list items:
+            // This needs to mark the level *after* the parent heading.
+            // Simplified for now: if this item is the "last_sibling_in_current_scope",
+            // then the line for its immediate parent should stop.
+            // The `last_sibling_status` array should track if the *vertical line* at that depth should continue.
+            // This is implicitly handled by how `prefix` is built.
+            // The `last_sibling_status` array is more strictly for heading levels.
+            // We need a more granular way to track branch endings for content/list blocks.
+            // For now, let's just ensure headings' status is handled correctly.
         }
     }
 

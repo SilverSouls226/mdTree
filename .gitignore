@@ -1,2 +1,7 @@
 mdtree
 Makefile
+GEMINI.md
+*.patch
+*.md
+photos
+test*
