@@ -115,6 +115,15 @@ void add_parsed_line(LineType type, int level, const char *text, int list_number
     num_lines++;
 }
 
+static bool is_line_filtered(Config *config, bool *should_print_cache, ParsedLine *line, int line_idx) {
+    if (should_print_cache && !should_print_cache[line_idx]) return true;
+    if (line->type == TYPE_HEADING && line->level > config->max_level_filter) return true;
+    if (line->type != TYPE_HEADING && config->max_level_filter != MAX_AWK_LEVEL) return true;
+    if (line->type == TYPE_EMPTY && strlen(line->text) == 0 && config->max_level_filter != MAX_AWK_LEVEL) return true;
+    if (line->type == TYPE_EMPTY) return true;
+    return false;
+}
+
 void cleanup() {
     for (int i = 0; i < num_lines; i++) {
         free(lines_data[i].text);
@@ -125,11 +134,11 @@ void cleanup() {
     capacity_lines = 0;
 }
 
-void process_markdown_file(const char *md_file_path, const char *global_prefix, Config *config) {
+bool process_markdown_file(const char *md_file_path, const char *global_prefix, Config *config, const char *item_prefix, const char *filename) {
     FILE *fp = fopen(md_file_path, "r");
     if (fp == NULL) {
         perror("Error opening Markdown file");
-        return;
+        return false;
     }
 
 
@@ -361,9 +370,73 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
 
 
     // --- Second Pass: Print formatted output ---
+    
+    bool *should_print_cache = NULL;
+    if (config->search_query) {
+        should_print_cache = calloc(num_lines, sizeof(bool));
+        for (int i = 0; i < num_lines; i++) {
+            char *text_to_search = lines_data[i].text;
+            bool found = false;
+            if (config->case_insensitive_search) {
+                if (find_substring_case_insensitive(text_to_search, config->search_query)) {
+                    found = true;
+                }
+            } else {
+                if (strstr(text_to_search, config->search_query) != NULL) {
+                    found = true;
+                }
+            }
+            
+            if (found) {
+                should_print_cache[i] = true;
+                
+                // Tracing back to mark parent headings
+                int target_level = -1;
+                if (lines_data[i].type == TYPE_HEADING) {
+                    target_level = lines_data[i].level - 1;
+                } else {
+                    // For content, find the nearest preceding heading
+                    for (int j = i - 1; j >= 0; j--) {
+                        if (lines_data[j].type == TYPE_HEADING) {
+                            target_level = lines_data[j].level;
+                            break;
+                        }
+                    }
+                }
+                
+                for (int j = i - 1; j >= 0; j--) {
+                    if (lines_data[j].type == TYPE_HEADING && lines_data[j].level <= target_level) {
+                        should_print_cache[j] = true;
+                        target_level = lines_data[j].level - 1;
+                        if (target_level <= 0) break;
+                    }
+                }
+            }
+        }
+    }
 
     // last_sibling_status[level] is true if the item at 'level' is the last sibling,
     // meaning subsequent items at higher levels (deeper indent) should use 'INDENT_STR' instead of 'PIPE_STR'
+
+    if (config->search_query) {
+        bool has_matches = false;
+        for (int i = 0; i < num_lines; i++) {
+            if (should_print_cache[i]) {
+                has_matches = true;
+                break;
+            }
+        }
+        if (!has_matches) {
+            free(should_print_cache);
+            cleanup();
+            return false;
+        }
+    }
+
+    if (filename) {
+        printf("%s%s\n", item_prefix ? item_prefix : "", filename);
+    }
+
     bool last_sibling_status[MAX_HEADING_LEVEL + 1]; 
     for (int i = 0; i <= MAX_HEADING_LEVEL; i++) {
         last_sibling_status[i] = false;
@@ -377,6 +450,8 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
         temp /= 10;
     }
 
+
+
     for (int i = 0; i < num_lines; i++) {
         ParsedLine *current_line = &lines_data[i];
 
@@ -387,15 +462,7 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
         bool is_last_sibling_in_current_scope = true;
 
         // Filtering logic
-        if (current_line->type == TYPE_HEADING && current_line->level > config->max_level_filter) {
-            continue;
-        }
-        if ((current_line->type != TYPE_HEADING) && config->max_level_filter != MAX_AWK_LEVEL) {
-            continue;
-        }
-        if (current_line->type == TYPE_EMPTY && strlen(current_line->text) == 0 && config->max_level_filter != MAX_AWK_LEVEL) {
-             continue; 
-        }
+        if (is_line_filtered(config, should_print_cache, current_line, i)) continue;
 
         if (current_line->type == TYPE_HEADING) {
             current_logical_level = current_line->level - 1;
@@ -405,11 +472,14 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
             for (int k = i + 1; k < num_lines; k++) {
                 ParsedLine *next_line = &lines_data[k];
                 if (next_line->type == TYPE_HEADING) {
-                    if (next_line->level == current_line->level) {
-                        is_last_sibling_in_current_scope = false;
-                        break;
-                    } else if (next_line->level < current_line->level) {
+                    if (next_line->level < current_line->level) {
                         break; // Scope ended, so it is the last sibling
+                    }
+                    if (next_line->level == current_line->level) {
+                        if (!is_line_filtered(config, should_print_cache, next_line, k)) {
+                            is_last_sibling_in_current_scope = false;
+                            break;
+                        }
                     }
                 }
             }
@@ -482,11 +552,13 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 if (next_line->type == TYPE_HEADING && next_line->level <= parent_heading_level) {
                     break; // Reached end of parent scope
                 }
-                if (next_line->type == TYPE_CONTENT || next_line->type == TYPE_CODE_BLOCK_CONTENT || 
-                    next_line->type == TYPE_BLOCKQUOTE || next_line->type == TYPE_HORIZONTAL_RULE) {
-                    // Only a normal line, code block, blockquote, or HR causes the vertical line to continue
-                    is_last_child = false;
-                    break;
+                if (!is_line_filtered(config, should_print_cache, next_line, k)) {
+                    if (next_line->type == TYPE_CONTENT || next_line->type == TYPE_CODE_BLOCK_CONTENT || 
+                        next_line->type == TYPE_BLOCKQUOTE || next_line->type == TYPE_HORIZONTAL_RULE) {
+                        // Only a normal line, code block, blockquote, or HR causes the vertical line to continue
+                        is_last_child = false;
+                        break;
+                    }
                 }
             }
 
@@ -646,5 +718,7 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
         }
     }
 
+    if (should_print_cache) free(should_print_cache);
     cleanup();
+    return true;
 }

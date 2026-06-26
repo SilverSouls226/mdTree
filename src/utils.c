@@ -1,5 +1,6 @@
 #include "types.h"
 #include "utils.h"
+#include <ctype.h>
 
 const char *PIPE_STR = "│   ";
 const char *ELBOW_STR = "└── ";
@@ -17,6 +18,8 @@ void display_help() {
     printf("  -d, --depth <level>    Limit the display to a certain heading level.\n");
     printf("                         1-6: Show headings up to the specified level (e.g., -d 2 shows H1 and H2).\n");
     printf("                         7:   Show all headings and all text content (default).\n");
+    printf("  -f, --find <string>    Search the file for the given string (case-sensitive) and show only matched lines and their parent headings.\n");
+    printf("  -i, --case-insensitive Make the search case-insensitive when used with -f.\n");
     printf("  -n, --line-numbers     Show original line numbers next to each tree item.\n");
     printf("  -w, --no-warnings      Suppress linter warnings at the end of the output.\n");
     printf("  -v, --version          Display version information.\n");
@@ -186,4 +189,18 @@ void print_formatted_text(const char *text, const char *initial_color_code, cons
         }
     }
     printf("%s", reset_color_code);
+}
+
+bool find_substring_case_insensitive(const char *haystack, const char *needle) {
+    if (!*needle) return true;
+    for (; *haystack; ++haystack) {
+        if (tolower((unsigned char)*haystack) == tolower((unsigned char)*needle)) {
+            const char *h, *n;
+            for (h = haystack, n = needle; *h && *n; ++h, ++n) {
+                if (tolower((unsigned char)*h) != tolower((unsigned char)*n)) break;
+            }
+            if (!*n) return true; // Matched entire needle
+        }
+    }
+    return false;
 }

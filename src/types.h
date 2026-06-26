@@ -75,6 +75,8 @@ typedef struct {
     int max_level_filter;
     bool show_line_numbers;
     bool suppress_warnings;
+    char *search_query;
+    bool case_insensitive_search;
 } Config;
 
 #endif

@@ -63,8 +63,7 @@ void process_directory(const char *dirpath, const char *global_prefix, Config *c
             printf("%s%s\n", item_prefix, namelist[i]->d_name);
             process_directory(path, next_prefix, config);
         } else {
-            printf("%s%s\n", item_prefix, namelist[i]->d_name);
-            process_markdown_file(path, next_prefix, config);
+            process_markdown_file(path, next_prefix, config, item_prefix, namelist[i]->d_name);
         }
         
         free(namelist[i]);
@@ -74,7 +73,7 @@ void process_directory(const char *dirpath, const char *global_prefix, Config *c
 }
 int main(int argc, char *argv[]) {
 
-    Config config = { MAX_AWK_LEVEL, false, false };
+    Config config = { MAX_AWK_LEVEL, false, false, NULL, false };
     int opt;
     int option_index = 0;
     static struct option long_options[] = {
@@ -83,10 +82,12 @@ int main(int argc, char *argv[]) {
         {"line-numbers", no_argument, 0, 'n' },
         {"no-warnings", no_argument, 0, 'w' },
         {"version", no_argument, 0, 'v' },
+        {"find", required_argument, 0, 'f' },
+        {"case-insensitive", no_argument, 0, 'i' },
         {0,      0,           0,   0  }
     };
 
-    while ((opt = getopt_long(argc, argv, "d:hnwv", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "d:hnwvf:i", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'd':
                 config.max_level_filter = atoi(optarg);
@@ -105,6 +106,12 @@ int main(int argc, char *argv[]) {
             case 'v':
                 printf("mdtree version 1.0.0\n");
                 return EXIT_SUCCESS;
+            case 'f':
+                config.search_query = optarg;
+                break;
+            case 'i':
+                config.case_insensitive_search = true;
+                break;
             case 'h':
                 display_help();
                 return EXIT_SUCCESS;
@@ -123,6 +130,14 @@ int main(int argc, char *argv[]) {
     if (optind < argc) {
         target_path = argv[optind];
     }
+
+    if (optind < argc - 1) {
+        fprintf(stderr, "Error: Too many arguments provided.\n");
+        fprintf(stderr, "If you are trying to use a long flag like --find, make sure to use two dashes (--).\n");
+        display_help();
+        return EXIT_FAILURE;
+    }
+
     
     struct stat st;
     if (stat(target_path, &st) != 0) {
@@ -130,11 +145,11 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
     
-    printf("%s\n", target_path);
     if (S_ISDIR(st.st_mode)) {
+        printf("%s\n", target_path);
         process_directory(target_path, "", &config);
     } else {
-        process_markdown_file(target_path, "", &config);
+        process_markdown_file(target_path, "", &config, "", target_path);
     }
     
     return EXIT_SUCCESS;
