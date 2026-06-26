@@ -77,6 +77,7 @@ typedef struct {
     bool suppress_warnings;
     char *search_query;
     bool case_insensitive_search;
+    bool use_regex;
 } Config;
 
 #endif

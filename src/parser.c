@@ -1,6 +1,7 @@
 #include "parser.h"
 #include "utils.h"
 #include <ctype.h>
+#include <regex.h>
 
 ParsedLine *lines_data = NULL;
 int num_lines = 0;
@@ -373,11 +374,27 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
     
     bool *should_print_cache = NULL;
     if (config->search_query) {
+        regex_t regex;
+        bool regex_compiled = false;
+        if (config->use_regex) {
+            int cflags = REG_EXTENDED;
+            if (config->case_insensitive_search) cflags |= REG_ICASE;
+            if (regcomp(&regex, config->search_query, cflags) == 0) {
+                regex_compiled = true;
+            } else {
+                fprintf(stderr, "Warning: Failed to compile regex '%s'\n", config->search_query);
+            }
+        }
+
         should_print_cache = calloc(num_lines, sizeof(bool));
         for (int i = 0; i < num_lines; i++) {
             char *text_to_search = lines_data[i].text;
             bool found = false;
-            if (config->case_insensitive_search) {
+            if (config->use_regex) {
+                if (regex_compiled && regexec(&regex, text_to_search, 0, NULL, 0) == 0) {
+                    found = true;
+                }
+            } else if (config->case_insensitive_search) {
                 if (find_substring_case_insensitive(text_to_search, config->search_query)) {
                     found = true;
                 }
@@ -412,6 +429,9 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                     }
                 }
             }
+        }
+        if (config->use_regex && regex_compiled) {
+            regfree(&regex);
         }
     }
 

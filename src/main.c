@@ -84,10 +84,11 @@ int main(int argc, char *argv[]) {
         {"version", no_argument, 0, 'v' },
         {"find", required_argument, 0, 'f' },
         {"case-insensitive", no_argument, 0, 'i' },
+        {"regex", required_argument, 0, 'r' },
         {0,      0,           0,   0  }
     };
 
-    while ((opt = getopt_long(argc, argv, "d:hnwvf:i", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "d:hnwvf:ir:", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'd':
                 config.max_level_filter = atoi(optarg);
@@ -108,9 +109,14 @@ int main(int argc, char *argv[]) {
                 return EXIT_SUCCESS;
             case 'f':
                 config.search_query = optarg;
+                config.use_regex = false;
                 break;
             case 'i':
                 config.case_insensitive_search = true;
+                break;
+            case 'r':
+                config.search_query = optarg;
+                config.use_regex = true;
                 break;
             case 'h':
                 display_help();

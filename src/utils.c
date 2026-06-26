@@ -19,7 +19,8 @@ void display_help() {
     printf("                         1-6: Show headings up to the specified level (e.g., -d 2 shows H1 and H2).\n");
     printf("                         7:   Show all headings and all text content (default).\n");
     printf("  -f, --find <string>    Search the file for the given string (case-sensitive) and show only matched lines and their parent headings.\n");
-    printf("  -i, --case-insensitive Make the search case-insensitive when used with -f.\n");
+    printf("  -i, --case-insensitive Make the search case-insensitive when used with -f or -r.\n");
+    printf("  -r, --regex <regex>    Search the file using a regular expression.\n");
     printf("  -n, --line-numbers     Show original line numbers next to each tree item.\n");
     printf("  -w, --no-warnings      Suppress linter warnings at the end of the output.\n");
     printf("  -v, --version          Display version information.\n");
