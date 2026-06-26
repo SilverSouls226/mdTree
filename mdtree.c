@@ -3,6 +3,8 @@
 #include <string.h>
 #include <stdbool.h>
 #include <getopt.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include <ctype.h> // For isdigit()
 
 // --- Constants and Symbols ---
@@ -74,21 +76,21 @@ int capacity_lines = 0;
 // --- Helper Functions ---
 
 void display_help() {
-    printf("Usage: mdtree [OPTIONS] <markdown_file>\n");
+    printf("Usage: mdtree [OPTIONS] [markdown_file | directory]\n");
     printf("\n");
-    printf("Visualize the structure of a Markdown file, showing headings and content\n");
+    printf("Visualize the structure of Markdown files, showing headings and content\n");
     printf("similar to how 'tree' shows directories and files.\n");
     printf("\n");
     printf("Options:\n");
-    printf("  -L <level>    Limit the display to a certain heading level.\n");
-    printf("                1-6: Show headings up to the specified level (e.g., -L 2 shows H1 and H2).\n");
-    printf("                7:   Show all headings and all text content (default).\n");
-    printf("  -h, --help    Display this help message and exit.\n");
+    printf("  -d, --depth <level>    Limit the display to a certain heading level.\n");
+    printf("                         1-6: Show headings up to the specified level (e.g., -d 2 shows H1 and H2).\n");
+    printf("                         7:   Show all headings and all text content (default).\n");
+    printf("  -h, --help             Display this help message and exit.\n");
     printf("\n");
     printf("Examples:\n");
     printf("  mdtree my_document.md\n");
-    printf("  mdtree -L 3 another_doc.md\n");
-    printf("  mdtree -L 7 all_content.md\n");
+    printf("  mdtree -d 3 another_doc.md\n");
+    printf("  mdtree -d 7 .\n");
 }
 
 // Function to add a parsed line to our dynamic array
@@ -119,6 +121,9 @@ void cleanup() {
         free(lines_data[i].text);
     }
     free(lines_data);
+    lines_data = NULL;
+    num_lines = 0;
+    capacity_lines = 0;
 }
 
 // Function to determine the indentation level of a line (leading spaces/tabs)
@@ -170,19 +175,24 @@ void print_formatted_text(const char *text, const char *initial_color_code, cons
                 printf("**");
                 current += 2;
             }
-        } else if (strncmp(current, "~~", 2) == 0) {
-            char *end = strstr(current + 2, "~~");
+        } else if (*current == '~') {
+            int num_tildes = (*(current + 1) == '~') ? 2 : 1;
+            char *search_str = (num_tildes == 2) ? "~~" : "~";
+            char *end = strstr(current + num_tildes, search_str);
             if (end) {
                 *end = '\0';
                 char new_color[128];
                 snprintf(new_color, sizeof(new_color), "%s\033[9m", initial_color_code);
-                print_formatted_text(current + 2, new_color, "");
+                print_formatted_text(current + num_tildes, new_color, "");
                 *end = '~';
                 printf("\033[29m%s", initial_color_code); // 29m resets strikethrough
-                current = end + 2;
+                current = end + num_tildes;
             } else {
-                printf("~~");
-                current += 2;
+                printf("%c", *current);
+                if (num_tildes == 2) {
+                    printf("%c", *(current + 1));
+                }
+                current += num_tildes;
             }
         } else if (*current == '*' || *current == '_') {
             char marker = *current;
@@ -224,55 +234,14 @@ void print_formatted_text(const char *text, const char *initial_color_code, cons
 
 // --- Main Logic ---
 
-int main(int argc, char *argv[]) {
-    int max_level_filter = MAX_AWK_LEVEL;
-    const char *md_file_path = NULL;
-    int opt;
-    int option_index = 0;
-    static struct option long_options[] = {
-        {"help", no_argument, 0,  'h' },
-        {0,      0,           0,   0  }
-    };
 
-    while ((opt = getopt_long(argc, argv, "L:h", long_options, &option_index)) != -1) {
-        switch (opt) {
-            case 'L':
-                max_level_filter = atoi(optarg);
-                if (max_level_filter < 1 || max_level_filter > MAX_AWK_LEVEL) {
-                    fprintf(stderr, "Error: Invalid level for -L. Must be between 1 and %d.\n", MAX_AWK_LEVEL);
-                    display_help();
-                    return EXIT_FAILURE;
-                }
-                break;
-            case 'h':
-                display_help();
-                return EXIT_SUCCESS;
-            case '?':
-                fprintf(stderr, "Error: Unknown option '-%c'.\n", optopt);
-                display_help();
-                return EXIT_FAILURE;
-            case ':':
-                fprintf(stderr, "Error: Option '-%c' requires an argument.\n", optopt);
-                display_help();
-                return EXIT_FAILURE;
-        }
-    }
-
-    if (optind < argc) {
-        md_file_path = argv[optind];
-    } else {
-        fprintf(stderr, "Error: No Markdown file specified.\n");
-        display_help();
-        return EXIT_FAILURE;
-    }
-
+void process_markdown_file(const char *md_file_path, const char *global_prefix, int max_level_filter) {
     FILE *fp = fopen(md_file_path, "r");
     if (fp == NULL) {
         perror("Error opening Markdown file");
-        return EXIT_FAILURE;
+        return;
     }
 
-    atexit(cleanup);
 
     char line_buffer[MAX_LINE_LENGTH];
     LineType prev_line_type = TYPE_EMPTY;
@@ -374,11 +343,12 @@ int main(int argc, char *argv[]) {
             char *list_content = trimmed_line + 2;
             LineType item_type = TYPE_UNORDERED_LIST_ITEM;
 
-            if (strncmp(list_content, "[ ] ", 4) == 0) {
-                item_type = TYPE_TASK_LIST_ITEM_UNCHECKED;
-                list_content += 4;
-            } else if (strncmp(list_content, "[x] ", 4) == 0 || strncmp(list_content, "[X] ", 4) == 0) {
-                item_type = TYPE_TASK_LIST_ITEM_CHECKED;
+            if (strlen(list_content) >= 4 && list_content[0] == '[' && list_content[2] == ']' && list_content[3] == ' ') {
+                if (list_content[1] == ' ') {
+                    item_type = TYPE_TASK_LIST_ITEM_UNCHECKED;
+                } else {
+                    item_type = TYPE_TASK_LIST_ITEM_CHECKED;
+                }
                 list_content += 4;
             }
 
@@ -445,6 +415,8 @@ int main(int argc, char *argv[]) {
         ParsedLine *current_line = &lines_data[i];
 
         char prefix[MAX_LINE_LENGTH] = "";
+        char full_prefix[MAX_LINE_LENGTH];
+        snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix);
         int current_logical_level = 0; // Represents the indentation level we are currently at (0-based)
         bool is_last_sibling_in_current_scope = true;
 
@@ -492,7 +464,7 @@ int main(int argc, char *argv[]) {
                 strcat(prefix, TEE_STR);
             }
             
-            printf("%s", prefix);
+            snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
             // Apply colors based on heading level
             switch (current_line->level) {
                 case 1: print_formatted_text(current_line->text, COLOR_BOLD COLOR_BRIGHT_YELLOW, COLOR_RESET); break;
@@ -582,7 +554,7 @@ int main(int argc, char *argv[]) {
                         strcat(subsequent_prefix, INDENT_STR);
                     }
 
-                    printf("%s", prefix);
+                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
                     char *code_text = current_line->text;
                     char *newline_pos;
                     bool first_line = true;
@@ -596,7 +568,7 @@ int main(int argc, char *argv[]) {
                                 printf("%s%s%s\n", COLOR_CYAN, code_text, COLOR_RESET);
                                 first_line = false;
                             } else {
-                                printf("%s%s%s%s\n", subsequent_prefix, COLOR_CYAN, code_text, COLOR_RESET);
+                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); printf("%s%s%s%s\n", full_sub_prefix, COLOR_CYAN, code_text, COLOR_RESET);
                             }
                             *newline_pos = '\n';
                             code_text = newline_pos + 1;
@@ -605,18 +577,18 @@ int main(int argc, char *argv[]) {
                             if (first_line) {
                                 printf("%s%s%s\n", COLOR_CYAN, code_text, COLOR_RESET);
                             } else if (*code_text != '\0') {
-                                printf("%s%s%s%s\n", subsequent_prefix, COLOR_CYAN, code_text, COLOR_RESET);
+                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); printf("%s%s%s%s\n", full_sub_prefix, COLOR_CYAN, code_text, COLOR_RESET);
                             }
                         }
                     }
                 } else if (current_line->type == TYPE_BLOCKQUOTE) {
-                    printf("%s%s> %s", prefix, COLOR_DIM, COLOR_RESET);
+                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s> %s", full_prefix, COLOR_DIM, COLOR_RESET);
                     print_formatted_text(current_line->text, COLOR_BRIGHT_GREEN, COLOR_RESET);
                     printf("\n");
                 } else if (current_line->type == TYPE_HORIZONTAL_RULE) {
-                    printf("%s%s──────────%s\n", prefix, COLOR_DIM, COLOR_RESET);
+                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s──────────%s\n", full_prefix, COLOR_DIM, COLOR_RESET);
                 } else {
-                    printf("%s", prefix); 
+                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix); 
                     print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET);
                     printf("\n");
                 }
@@ -634,13 +606,13 @@ int main(int argc, char *argv[]) {
                 }
                 
                 if (current_line->type == TYPE_TASK_LIST_ITEM_CHECKED) {
-                    printf("%s%s[%s✓%s] ", prefix, COLOR_DIM, COLOR_BRIGHT_GREEN, COLOR_DIM);
+                    printf("%s%s[%s✓%s%s] ", prefix, COLOR_DIM, COLOR_BRIGHT_GREEN, COLOR_RESET, COLOR_DIM);
                     print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
                 } else if (current_line->type == TYPE_TASK_LIST_ITEM_UNCHECKED) {
                     printf("%s%s[ ] %s", prefix, COLOR_DIM, COLOR_RESET);
                     print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
                 } else {
-                    printf("%s%s", prefix, BULLET_POINT); 
+                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s", full_prefix, BULLET_POINT); 
                     print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
                 }
                 printf("\n");
@@ -653,7 +625,7 @@ int main(int argc, char *argv[]) {
                 for (int j = 0; j < current_raw_indent_blocks; j++) {
                     strcat(prefix, INDENT_STR);
                 }
-                printf("%s%s%d.%s ", prefix, COLOR_BRIGHT_BLUE, current_line->list_number, COLOR_RESET); 
+                snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s%d.%s ", full_prefix, COLOR_BRIGHT_BLUE, current_line->list_number, COLOR_RESET); 
                 print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
                 printf("\n");
             }
@@ -670,5 +642,133 @@ int main(int argc, char *argv[]) {
         }
     }
 
+
+    cleanup();
+}
+
+int filter_md(const struct dirent *entry) {
+    if (entry->d_name[0] == '.') return 0; // Ignore dot files
+    return 1;
+}
+
+void process_directory(const char *dirpath, const char *global_prefix, int max_level_filter);
+
+void process_directory(const char *dirpath, const char *global_prefix, int max_level_filter) {
+    struct dirent **namelist;
+    int n = scandir(dirpath, &namelist, filter_md, alphasort);
+    if (n < 0) {
+        perror("scandir");
+        return;
+    }
+    
+    int valid_count = 0;
+    for (int i = 0; i < n; i++) {
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/%s", dirpath, namelist[i]->d_name);
+        struct stat st;
+        if (stat(path, &st) == 0) {
+            if (S_ISDIR(st.st_mode) || strstr(namelist[i]->d_name, ".md") != NULL) {
+                valid_count++;
+            } else {
+                free(namelist[i]);
+                namelist[i] = NULL;
+            }
+        } else {
+            free(namelist[i]);
+            namelist[i] = NULL;
+        }
+    }
+    
+    int processed = 0;
+    for (int i = 0; i < n; i++) {
+        if (namelist[i] == NULL) continue;
+        
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/%s", dirpath, namelist[i]->d_name);
+        struct stat st;
+        stat(path, &st);
+        
+        bool is_last = (processed == valid_count - 1);
+        char next_prefix[MAX_LINE_LENGTH];
+        snprintf(next_prefix, sizeof(next_prefix), "%s%s", global_prefix, is_last ? "    " : "│   ");
+        
+        char item_prefix[MAX_LINE_LENGTH];
+        snprintf(item_prefix, sizeof(item_prefix), "%s%s", global_prefix, is_last ? "└── " : "├── ");
+        
+        if (S_ISDIR(st.st_mode)) {
+            printf("%s%s\n", item_prefix, namelist[i]->d_name);
+            process_directory(path, next_prefix, max_level_filter);
+        } else {
+            printf("%s%s\n", item_prefix, namelist[i]->d_name);
+            process_markdown_file(path, next_prefix, max_level_filter);
+        }
+        
+        free(namelist[i]);
+        processed++;
+    }
+    free(namelist);
+}
+int main(int argc, char *argv[]) {
+    int max_level_filter = MAX_AWK_LEVEL;
+    const char *md_file_path = NULL;
+    int opt;
+    int option_index = 0;
+    static struct option long_options[] = {
+        {"help", no_argument, 0,  'h' },
+        {"depth", required_argument, 0, 'd' },
+        {0,      0,           0,   0  }
+    };
+
+    while ((opt = getopt_long(argc, argv, "d:h", long_options, &option_index)) != -1) {
+        switch (opt) {
+            case 'd':
+                max_level_filter = atoi(optarg);
+                if (max_level_filter < 1 || max_level_filter > MAX_AWK_LEVEL) {
+                    fprintf(stderr, "Error: Invalid level for -d/--depth. Must be between 1 and %d.\n", MAX_AWK_LEVEL);
+                    display_help();
+                    return EXIT_FAILURE;
+                }
+                break;
+            case 'h':
+                display_help();
+                return EXIT_SUCCESS;
+            case '?':
+                fprintf(stderr, "Error: Unknown option.\n");
+                display_help();
+                return EXIT_FAILURE;
+            case ':':
+                fprintf(stderr, "Error: Option requires an argument.\n");
+                display_help();
+                return EXIT_FAILURE;
+        }
+    }
+
+    if (optind < argc) {
+        md_file_path = argv[optind];
+    } else {
+        fprintf(stderr, "Error: No Markdown file specified.\n");
+        display_help();
+        return EXIT_FAILURE;
+    }
+
+
+    const char *target_path = ".";
+    if (optind < argc) {
+        target_path = argv[optind];
+    }
+    
+    struct stat st;
+    if (stat(target_path, &st) != 0) {
+        perror("Error accessing path");
+        return EXIT_FAILURE;
+    }
+    
+    printf("%s\n", target_path);
+    if (S_ISDIR(st.st_mode)) {
+        process_directory(target_path, "", max_level_filter);
+    } else {
+        process_markdown_file(target_path, "", max_level_filter);
+    }
+    
     return EXIT_SUCCESS;
 }
