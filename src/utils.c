@@ -2,6 +2,10 @@
 #include "utils.h"
 #include <ctype.h>
 
+bool g_no_color = false;
+bool g_ascii_tree = false;
+Stats g_stats = {0};
+
 const char *PIPE_STR = "│   ";
 const char *ELBOW_STR = "└── ";
 const char *TEE_STR = "├── ";
@@ -21,6 +25,9 @@ void display_help() {
     printf("  -f, --find <string>    Search the file for the given string (case-sensitive) and show only matched lines and their parent headings.\n");
     printf("  -i, --case-insensitive Make the search case-insensitive when used with -f or -r.\n");
     printf("  -r, --regex <regex>    Search the file using a regular expression.\n");
+    printf("  -c, --no-color         Disable colored output.\n");
+    printf("  -a, --ascii            Use ASCII characters for tree branches instead of box-drawing characters.\n");
+    printf("  -s, --stats            Print statistics about parsed files at the end.\n");
     printf("  -n, --line-numbers     Show original line numbers next to each tree item.\n");
     printf("  -w, --no-warnings      Suppress linter warnings at the end of the output.\n");
     printf("  -v, --version          Display version information.\n");
@@ -204,4 +211,30 @@ bool find_substring_case_insensitive(const char *haystack, const char *needle) {
         }
     }
     return false;
+}
+
+void apply_config(Config *config) {
+    g_no_color = config->no_color;
+    g_ascii_tree = config->ascii_tree;
+    if (g_ascii_tree) {
+        PIPE_STR = "|   ";
+        ELBOW_STR = "`-- ";
+        TEE_STR = "|-- ";
+        BULLET_POINT = "* ";
+    }
+}
+
+int count_words(const char *text) {
+    int count = 0;
+    bool in_word = false;
+    while (*text) {
+        if (isspace((unsigned char)*text)) {
+            in_word = false;
+        } else if (!in_word) {
+            in_word = true;
+            count++;
+        }
+        text++;
+    }
+    return count;
 }

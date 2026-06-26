@@ -137,6 +137,9 @@ void cleanup() {
 
 bool process_markdown_file(const char *md_file_path, const char *global_prefix, Config *config, const char *item_prefix, const char *filename) {
     FILE *fp = fopen(md_file_path, "r");
+    if (config->show_stats) {
+        g_stats.files_parsed++;
+    }
     if (fp == NULL) {
         perror("Error opening Markdown file");
         return false;
@@ -484,6 +487,18 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
         // Filtering logic
         if (is_line_filtered(config, should_print_cache, current_line, i)) continue;
 
+        if (config->show_stats) {
+            if (current_line->type == TYPE_HEADING) {
+                g_stats.headings++;
+                g_stats.words += count_words(current_line->text);
+            } else if (current_line->type == TYPE_CONTENT || current_line->type == TYPE_BLOCKQUOTE || current_line->type == TYPE_CODE_BLOCK_CONTENT) {
+                g_stats.words += count_words(current_line->text);
+            } else if (current_line->type == TYPE_UNORDERED_LIST_ITEM || current_line->type == TYPE_ORDERED_LIST_ITEM || current_line->type == TYPE_TASK_LIST_ITEM_CHECKED || current_line->type == TYPE_TASK_LIST_ITEM_UNCHECKED) {
+                g_stats.lists++;
+                g_stats.words += count_words(current_line->text);
+            }
+        }
+
         if (current_line->type == TYPE_HEADING) {
             current_logical_level = current_line->level - 1;
 
@@ -520,11 +535,11 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 strcat(prefix, TEE_STR);
             }
             
-            if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
+            if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
             // Apply colors based on heading level
             switch (current_line->level) {
-                case 1: print_formatted_text(current_line->text, COLOR_BOLD COLOR_BRIGHT_YELLOW, COLOR_RESET); break;
-                case 2: print_formatted_text(current_line->text, COLOR_BOLD COLOR_BRIGHT_CYAN, COLOR_RESET); break;
+                case 1: print_formatted_text(current_line->text, COLOR_BOLD_BRIGHT_YELLOW, COLOR_RESET); break;
+                case 2: print_formatted_text(current_line->text, COLOR_BOLD_BRIGHT_CYAN, COLOR_RESET); break;
                 case 3: print_formatted_text(current_line->text, COLOR_GREEN, COLOR_RESET); break;
                 case 4: print_formatted_text(current_line->text, COLOR_MAGENTA, COLOR_RESET); break;
                 case 5: print_formatted_text(current_line->text, COLOR_BLUE, COLOR_RESET); break;
@@ -612,7 +627,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                         strcat(subsequent_prefix, INDENT_STR);
                     }
 
-                    if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
+                    if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
                     char *code_text = current_line->text;
                     char *newline_pos;
                     bool first_line = true;
@@ -628,7 +643,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                                 printf("%s%s%s\n", COLOR_CYAN, code_text, COLOR_RESET);
                                 first_line = false;
                             } else {
-                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET); } printf("%s%s%s%s\n", full_sub_prefix, COLOR_CYAN, code_text, COLOR_RESET);
+                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET, VLINE_STR); } printf("%s%s%s%s\n", full_sub_prefix, COLOR_CYAN, code_text, COLOR_RESET);
                             }
                             *newline_pos = '\n';
                             code_text = newline_pos + 1;
@@ -638,18 +653,18 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                                 current_cb_line++;
                                 printf("%s%s%s\n", COLOR_CYAN, code_text, COLOR_RESET);
                             } else if (*code_text != '\0') {
-                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET); } printf("%s%s%s%s\n", full_sub_prefix, COLOR_CYAN, code_text, COLOR_RESET);
+                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET, VLINE_STR); } printf("%s%s%s%s\n", full_sub_prefix, COLOR_CYAN, code_text, COLOR_RESET);
                             }
                         }
                     }
                 } else if (current_line->type == TYPE_BLOCKQUOTE) {
-                    if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s> %s", full_prefix, COLOR_DIM, COLOR_RESET);
+                    if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s> %s", full_prefix, COLOR_DIM, COLOR_RESET);
                     print_formatted_text(current_line->text, COLOR_BRIGHT_GREEN, COLOR_RESET);
                     printf("\n");
                 } else if (current_line->type == TYPE_HORIZONTAL_RULE) {
-                    if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s──────────%s\n", full_prefix, COLOR_DIM, COLOR_RESET);
+                    if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s%s%s\n", full_prefix, COLOR_DIM, HLINE_STR, COLOR_RESET); //, full_prefix, COLOR_DIM, COLOR_RESET);
                 } else {
-                    if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix); 
+                    if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix); 
                     print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET);
                     printf("\n");
                 }
@@ -667,13 +682,13 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 }
                 
                 if (current_line->type == TYPE_TASK_LIST_ITEM_CHECKED) {
-                    char full_item_prefix[MAX_LINE_LENGTH]; snprintf(full_item_prefix, sizeof(full_item_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } printf("%s%s[%s✓%s%s] ", full_item_prefix, COLOR_DIM, COLOR_BRIGHT_GREEN, COLOR_RESET, COLOR_DIM);
+                    char full_item_prefix[MAX_LINE_LENGTH]; snprintf(full_item_prefix, sizeof(full_item_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } printf("%s%s[%s✓%s%s] ", full_item_prefix, COLOR_DIM, COLOR_BRIGHT_GREEN, COLOR_RESET, COLOR_DIM);
                     print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
                 } else if (current_line->type == TYPE_TASK_LIST_ITEM_UNCHECKED) {
-                    char full_item_prefix[MAX_LINE_LENGTH]; snprintf(full_item_prefix, sizeof(full_item_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } printf("%s%s[ ] %s", full_item_prefix, COLOR_DIM, COLOR_RESET);
+                    char full_item_prefix[MAX_LINE_LENGTH]; snprintf(full_item_prefix, sizeof(full_item_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } printf("%s%s[ ] %s", full_item_prefix, COLOR_DIM, COLOR_RESET);
                     print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
                 } else {
-                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } printf("%s%s", full_prefix, BULLET_POINT); 
+                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } printf("%s%s", full_prefix, BULLET_POINT); 
                     print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
                 }
                 printf("\n");
@@ -686,7 +701,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 for (int j = 0; j < current_raw_indent_blocks; j++) {
                     strcat(prefix, INDENT_STR);
                 }
-                snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } printf("%s%s%d.%s ", full_prefix, COLOR_BRIGHT_BLUE, current_line->list_number, COLOR_RESET); 
+                snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } printf("%s%s%d.%s ", full_prefix, COLOR_BRIGHT_BLUE, current_line->list_number, COLOR_RESET); 
                 print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
                 printf("\n");
             }
@@ -714,7 +729,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
     }
 
     if (!config->suppress_warnings && has_any_warnings) {
-        printf("\n%s────────── Linter Warnings ──────────%s\n", COLOR_BRIGHT_YELLOW, COLOR_RESET);
+        printf("\n%s%s Linter Warnings %s%s\n", COLOR_BRIGHT_YELLOW, HLINE_STR, HLINE_STR, COLOR_RESET); //, COLOR_BRIGHT_YELLOW, COLOR_RESET);
         for (int j = 0; j < num_warnings; j++) {
             printf("%sLine %d: %s%s\n", COLOR_YELLOW, warnings[j].line_number, warnings[j].message, COLOR_RESET);
         }

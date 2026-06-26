@@ -18,33 +18,51 @@ extern const char *BULLET_POINT;
 #define MAX_AWK_LEVEL 7 // Our custom -L 7 to show all text
 
 // --- ANSI Color Codes ---
-#define COLOR_RESET       "\033[0m"
-#define COLOR_BOLD        "\033[1m"
-#define COLOR_DIM         "\033[2m"
-#define COLOR_UNDERLINE   "\033[4m"
+extern bool g_no_color;
+extern bool g_ascii_tree;
+
+#define COLOR_RESET       (g_no_color ? "" : "\033[0m")
+#define COLOR_BOLD        (g_no_color ? "" : "\033[1m")
+#define COLOR_DIM         (g_no_color ? "" : "\033[2m")
+#define COLOR_UNDERLINE   (g_no_color ? "" : "\033[4m")
 
 // Foreground colors
-#define COLOR_BLACK       "\033[30m"
-#define COLOR_RED         "\033[31m"
-#define COLOR_GREEN       "\033[32m"
-#define COLOR_YELLOW      "\033[33m"
-#define COLOR_BLUE        "\033[34m"
-#define COLOR_MAGENTA     "\033[35m"
-#define COLOR_CYAN        "\033[36m"
-#define COLOR_WHITE       "\033[37m"
+#define COLOR_BLACK       (g_no_color ? "" : "\033[30m")
+#define COLOR_RED         (g_no_color ? "" : "\033[31m")
+#define COLOR_GREEN       (g_no_color ? "" : "\033[32m")
+#define COLOR_YELLOW      (g_no_color ? "" : "\033[33m")
+#define COLOR_BLUE        (g_no_color ? "" : "\033[34m")
+#define COLOR_MAGENTA     (g_no_color ? "" : "\033[35m")
+#define COLOR_CYAN        (g_no_color ? "" : "\033[36m")
+#define COLOR_WHITE       (g_no_color ? "" : "\033[37m")
 
 // Bright foreground colors
-#define COLOR_BRIGHT_BLACK  "\033[90m" // Dark grey
-#define COLOR_BRIGHT_RED    "\033[91m"
-#define COLOR_BRIGHT_GREEN  "\033[92m"
-#define COLOR_BRIGHT_YELLOW "\033[93m"
-#define COLOR_BRIGHT_BLUE   "\033[94m"
-#define COLOR_BRIGHT_MAGENTA "\033[95m"
-#define COLOR_BRIGHT_CYAN   "\033[96m"
-#define COLOR_BRIGHT_WHITE  "\033[97m" // Lighter white/grey
+#define COLOR_BRIGHT_BLACK  (g_no_color ? "" : "\033[90m") // Dark grey
+#define COLOR_BRIGHT_RED    (g_no_color ? "" : "\033[91m")
+#define COLOR_BRIGHT_GREEN  (g_no_color ? "" : "\033[92m")
+#define COLOR_BRIGHT_YELLOW (g_no_color ? "" : "\033[93m")
+#define COLOR_BRIGHT_BLUE   (g_no_color ? "" : "\033[94m")
+#define COLOR_BRIGHT_MAGENTA (g_no_color ? "" : "\033[95m")
+#define COLOR_BRIGHT_CYAN   (g_no_color ? "" : "\033[96m")
+#define COLOR_BRIGHT_WHITE  (g_no_color ? "" : "\033[97m") // Lighter white/grey
+
+#define COLOR_BOLD_BRIGHT_YELLOW (g_no_color ? "" : "\033[1m\033[93m")
+#define COLOR_BOLD_BRIGHT_CYAN   (g_no_color ? "" : "\033[1m\033[96m")
+#define VLINE_STR (g_ascii_tree ? "|" : "│")
+#define HLINE_STR (g_ascii_tree ? "----------" : "──────────")
 
 
 // --- Data Structures ---
+
+typedef struct {
+    int files_parsed;
+    int headings;
+    int lists;
+    int words;
+} Stats;
+
+extern Stats g_stats;
+
 typedef enum {
     TYPE_HEADING,
     TYPE_CONTENT,
@@ -78,6 +96,9 @@ typedef struct {
     char *search_query;
     bool case_insensitive_search;
     bool use_regex;
+    bool no_color;
+    bool ascii_tree;
+    bool show_stats;
 } Config;
 
 #endif

@@ -54,10 +54,10 @@ void process_directory(const char *dirpath, const char *global_prefix, Config *c
         
         bool is_last = (processed == valid_count - 1);
         char next_prefix[MAX_LINE_LENGTH];
-        snprintf(next_prefix, sizeof(next_prefix), "%s%s", global_prefix, is_last ? "    " : "│   ");
+        snprintf(next_prefix, sizeof(next_prefix), "%s%s", global_prefix, is_last ? "    " : (config->ascii_tree ? "|   " : "│   "));
         
         char item_prefix[MAX_LINE_LENGTH];
-        snprintf(item_prefix, sizeof(item_prefix), "%s%s", global_prefix, is_last ? "└── " : "├── ");
+        snprintf(item_prefix, sizeof(item_prefix), "%s%s", global_prefix, is_last ? (config->ascii_tree ? "`-- " : "└── ") : (config->ascii_tree ? "|-- " : "├── "));
         
         if (S_ISDIR(st.st_mode)) {
             printf("%s%s\n", item_prefix, namelist[i]->d_name);
@@ -73,7 +73,7 @@ void process_directory(const char *dirpath, const char *global_prefix, Config *c
 }
 int main(int argc, char *argv[]) {
 
-    Config config = { MAX_AWK_LEVEL, false, false, NULL, false };
+    Config config = { MAX_AWK_LEVEL, false, false, NULL, false, false, false, false, false };
     int opt;
     int option_index = 0;
     static struct option long_options[] = {
@@ -85,10 +85,13 @@ int main(int argc, char *argv[]) {
         {"find", required_argument, 0, 'f' },
         {"case-insensitive", no_argument, 0, 'i' },
         {"regex", required_argument, 0, 'r' },
+        {"no-color", no_argument, 0, 'c' },
+        {"ascii", no_argument, 0, 'a' },
+        {"stats", no_argument, 0, 's' },
         {0,      0,           0,   0  }
     };
 
-    while ((opt = getopt_long(argc, argv, "d:hnwvf:ir:", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "d:hnwvf:ir:cas", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'd':
                 config.max_level_filter = atoi(optarg);
@@ -118,6 +121,15 @@ int main(int argc, char *argv[]) {
                 config.search_query = optarg;
                 config.use_regex = true;
                 break;
+            case 'c':
+                config.no_color = true;
+                break;
+            case 'a':
+                config.ascii_tree = true;
+                break;
+            case 's':
+                config.show_stats = true;
+                break;
             case 'h':
                 display_help();
                 return EXIT_SUCCESS;
@@ -144,7 +156,8 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    
+    apply_config(&config);
+
     struct stat st;
     if (stat(target_path, &st) != 0) {
         perror("Error accessing path");
@@ -158,5 +171,8 @@ int main(int argc, char *argv[]) {
         process_markdown_file(target_path, "", &config, "", target_path);
     }
     
+    if (config.show_stats) {
+        printf("\n\n%d files parsed, %d headings, %d list items, %d words total.\n", g_stats.files_parsed, g_stats.headings, g_stats.lists, g_stats.words);
+    }
     return EXIT_SUCCESS;
 }
