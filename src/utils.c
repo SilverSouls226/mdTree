@@ -17,12 +17,15 @@ void display_help() {
     printf("  -d, --depth <level>    Limit the display to a certain heading level.\n");
     printf("                         1-6: Show headings up to the specified level (e.g., -d 2 shows H1 and H2).\n");
     printf("                         7:   Show all headings and all text content (default).\n");
+    printf("  -n, --line-numbers     Show original line numbers next to each tree item.\n");
+    printf("  -w, --no-warnings      Suppress linter warnings at the end of the output.\n");
+    printf("  -v, --version          Display version information.\n");
     printf("  -h, --help             Display this help message and exit.\n");
     printf("\n");
     printf("Examples:\n");
     printf("  mdtree my_document.md\n");
     printf("  mdtree -d 3 another_doc.md\n");
-    printf("  mdtree -d 7 .\n");
+    printf("  mdtree -n -d 7 .\n");
 }
 
 

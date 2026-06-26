@@ -63,6 +63,18 @@ typedef struct {
     int level; // 1-6 for headings, 0 for content/empty, raw indentation level for lists
     char *text; // Dynamically allocated string for the line content
     int list_number; // Only used for TYPE_ORDERED_LIST_ITEM
+    int original_line_num;
 } ParsedLine;
+
+typedef struct {
+    int line_number;
+    char message[256];
+} LintWarning;
+
+typedef struct {
+    int max_level_filter;
+    bool show_line_numbers;
+    bool suppress_warnings;
+} Config;
 
 #endif

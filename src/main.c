@@ -15,9 +15,9 @@ int filter_md(const struct dirent *entry) {
     return 1;
 }
 
-void process_directory(const char *dirpath, const char *global_prefix, int max_level_filter);
+void process_directory(const char *dirpath, const char *global_prefix, Config *config);
 
-void process_directory(const char *dirpath, const char *global_prefix, int max_level_filter) {
+void process_directory(const char *dirpath, const char *global_prefix, Config *config) {
     struct dirent **namelist;
     int n = scandir(dirpath, &namelist, filter_md, alphasort);
     if (n < 0) {
@@ -61,10 +61,10 @@ void process_directory(const char *dirpath, const char *global_prefix, int max_l
         
         if (S_ISDIR(st.st_mode)) {
             printf("%s%s\n", item_prefix, namelist[i]->d_name);
-            process_directory(path, next_prefix, max_level_filter);
+            process_directory(path, next_prefix, config);
         } else {
             printf("%s%s\n", item_prefix, namelist[i]->d_name);
-            process_markdown_file(path, next_prefix, max_level_filter);
+            process_markdown_file(path, next_prefix, config);
         }
         
         free(namelist[i]);
@@ -74,25 +74,37 @@ void process_directory(const char *dirpath, const char *global_prefix, int max_l
 }
 int main(int argc, char *argv[]) {
 
-    int max_level_filter = MAX_AWK_LEVEL;
+    Config config = { MAX_AWK_LEVEL, false, false };
     int opt;
     int option_index = 0;
     static struct option long_options[] = {
-        {"help", no_argument, 0,  'h' },
+        {"help", no_argument, 0, 'h' },
         {"depth", required_argument, 0, 'd' },
+        {"line-numbers", no_argument, 0, 'n' },
+        {"no-warnings", no_argument, 0, 'w' },
+        {"version", no_argument, 0, 'v' },
         {0,      0,           0,   0  }
     };
 
-    while ((opt = getopt_long(argc, argv, "d:h", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "d:hnwv", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'd':
-                max_level_filter = atoi(optarg);
-                if (max_level_filter < 1 || max_level_filter > MAX_AWK_LEVEL) {
+                config.max_level_filter = atoi(optarg);
+                if (config.max_level_filter < 1 || config.max_level_filter > MAX_AWK_LEVEL) {
                     fprintf(stderr, "Error: Invalid level for -d/--depth. Must be between 1 and %d.\n", MAX_AWK_LEVEL);
                     display_help();
                     return EXIT_FAILURE;
                 }
                 break;
+            case 'n':
+                config.show_line_numbers = true;
+                break;
+            case 'w':
+                config.suppress_warnings = true;
+                break;
+            case 'v':
+                printf("mdtree version 1.0.0\n");
+                return EXIT_SUCCESS;
             case 'h':
                 display_help();
                 return EXIT_SUCCESS;
@@ -120,9 +132,9 @@ int main(int argc, char *argv[]) {
     
     printf("%s\n", target_path);
     if (S_ISDIR(st.st_mode)) {
-        process_directory(target_path, "", max_level_filter);
+        process_directory(target_path, "", &config);
     } else {
-        process_markdown_file(target_path, "", max_level_filter);
+        process_markdown_file(target_path, "", &config);
     }
     
     return EXIT_SUCCESS;

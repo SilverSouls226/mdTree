@@ -6,7 +6,94 @@ ParsedLine *lines_data = NULL;
 int num_lines = 0;
 int capacity_lines = 0;
 
-void add_parsed_line(LineType type, int level, const char *text, int list_number) {
+LintWarning *warnings = NULL;
+int num_warnings = 0;
+int capacity_warnings = 0;
+
+void add_warning(int line_number, const char *msg) {
+    if (num_warnings >= capacity_warnings) {
+        capacity_warnings = (capacity_warnings == 0) ? 10 : capacity_warnings * 2;
+        warnings = realloc(warnings, capacity_warnings * sizeof(LintWarning));
+    }
+    warnings[num_warnings].line_number = line_number;
+    strncpy(warnings[num_warnings].message, msg, 255);
+    warnings[num_warnings].message[255] = '\0';
+    num_warnings++;
+}
+
+typedef struct {
+    char *text;
+    int first_line;
+    int *duplicate_lines;
+    int num_duplicates;
+    int capacity_duplicates;
+} SeenHeading;
+
+SeenHeading *seen_headings = NULL;
+int num_seen_headings = 0;
+int capacity_seen_headings = 0;
+
+void add_seen_heading(const char *text, int line_num) {
+    if (num_seen_headings >= capacity_seen_headings) {
+        capacity_seen_headings = (capacity_seen_headings == 0) ? 10 : capacity_seen_headings * 2;
+        seen_headings = realloc(seen_headings, capacity_seen_headings * sizeof(SeenHeading));
+    }
+    seen_headings[num_seen_headings].text = strdup(text);
+    seen_headings[num_seen_headings].first_line = line_num;
+    seen_headings[num_seen_headings].duplicate_lines = NULL;
+    seen_headings[num_seen_headings].num_duplicates = 0;
+    seen_headings[num_seen_headings].capacity_duplicates = 0;
+    num_seen_headings++;
+}
+
+bool check_and_add_duplicate(const char *text, int line_num) {
+    for (int i = 0; i < num_seen_headings; i++) {
+        if (strcmp(seen_headings[i].text, text) == 0) {
+            SeenHeading *sh = &seen_headings[i];
+            if (sh->num_duplicates >= sh->capacity_duplicates) {
+                sh->capacity_duplicates = (sh->capacity_duplicates == 0) ? 5 : sh->capacity_duplicates * 2;
+                sh->duplicate_lines = realloc(sh->duplicate_lines, sh->capacity_duplicates * sizeof(int));
+            }
+            sh->duplicate_lines[sh->num_duplicates++] = line_num;
+            return true;
+        }
+    }
+    return false;
+}
+
+int *h1_lines = NULL;
+int num_h1s = 0;
+int capacity_h1s = 0;
+
+void add_h1_line(int line_num) {
+    if (num_h1s >= capacity_h1s) {
+        capacity_h1s = (capacity_h1s == 0) ? 10 : capacity_h1s * 2;
+        h1_lines = realloc(h1_lines, capacity_h1s * sizeof(int));
+    }
+    h1_lines[num_h1s++] = line_num;
+}
+
+void cleanup_warnings() {
+    if (warnings) free(warnings);
+    for (int i = 0; i < num_seen_headings; i++) {
+        free(seen_headings[i].text);
+        if (seen_headings[i].duplicate_lines) free(seen_headings[i].duplicate_lines);
+    }
+    if (seen_headings) free(seen_headings);
+    if (h1_lines) free(h1_lines);
+    warnings = NULL;
+    num_warnings = 0;
+    capacity_warnings = 0;
+    seen_headings = NULL;
+    num_seen_headings = 0;
+    capacity_seen_headings = 0;
+    h1_lines = NULL;
+    num_h1s = 0;
+    capacity_h1s = 0;
+}
+
+
+void add_parsed_line(LineType type, int level, const char *text, int list_number, int line_number) {
     if (num_lines >= capacity_lines) {
         capacity_lines = (capacity_lines == 0) ? 100 : capacity_lines * 2;
         ParsedLine *new_lines_data = realloc(lines_data, capacity_lines * sizeof(ParsedLine));
@@ -24,6 +111,7 @@ void add_parsed_line(LineType type, int level, const char *text, int list_number
         exit(EXIT_FAILURE);
     }
     lines_data[num_lines].list_number = list_number;
+    lines_data[num_lines].original_line_num = line_number;
     num_lines++;
 }
 
@@ -37,7 +125,7 @@ void cleanup() {
     capacity_lines = 0;
 }
 
-void process_markdown_file(const char *md_file_path, const char *global_prefix, int max_level_filter) {
+void process_markdown_file(const char *md_file_path, const char *global_prefix, Config *config) {
     FILE *fp = fopen(md_file_path, "r");
     if (fp == NULL) {
         perror("Error opening Markdown file");
@@ -46,13 +134,32 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
 
 
     char line_buffer[MAX_LINE_LENGTH];
-    LineType prev_line_type = TYPE_EMPTY;
     int prev_line_idx = -1;
     bool in_code_block = false;
 
+    int current_line_num = 0;
+
+
+    cleanup_warnings();
+    
+    int last_heading_level = 0;
+    int total_headings = 0;
+
     // --- First Pass: Parse file and store data ---
+
     while (fgets(line_buffer, sizeof(line_buffer), fp) != NULL) {
+        current_line_num++;
+
+        // Trailing whitespace warning
+        int original_len = strlen(line_buffer);
+        // fgets includes the newline character, so the last char is \n (unless it's the last line without one).
+        int last_char_idx = (original_len > 0 && line_buffer[original_len - 1] == '\n') ? original_len - 2 : original_len - 1;
+        if (last_char_idx >= 0 && (line_buffer[last_char_idx] == ' ' || line_buffer[last_char_idx] == '\t')) {
+            add_warning(current_line_num, "Trailing whitespace detected");
+        }
+        
         line_buffer[strcspn(line_buffer, "\n")] = 0;
+
         int len = strlen(line_buffer);
         
         int raw_current_indent = get_raw_indentation_level(line_buffer);
@@ -63,7 +170,7 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
             in_code_block = !in_code_block;
             if (in_code_block) {
                 // Starting a new code block, add an empty ParsedLine for it
-                add_parsed_line(TYPE_CODE_BLOCK_CONTENT, raw_current_indent, "", 0);
+                add_parsed_line(TYPE_CODE_BLOCK_CONTENT, raw_current_indent, "", 0, current_line_num);
             }
             continue; // Do not render the backticks themselves
         }
@@ -83,15 +190,47 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
             continue;
         }
 
-        // ATX Headings
+
+        // Check for level > 6
         if (len > 0 && trimmed_line[0] == '#') {
             int level = 0;
-            while (level < strlen(trimmed_line) && trimmed_line[level] == '#') {
+            while ((size_t)level < strlen(trimmed_line) && trimmed_line[level] == '#') {
+                level++;
+            }
+            if (level > 6 && (trimmed_line[level] == ' ' || trimmed_line[level] == '\0')) {
+                add_warning(current_line_num, "Heading level exceeds 6");
+            }
+        }
+        
+        // ATX Headings
+
+        if (len > 0 && trimmed_line[0] == '#') {
+            int level = 0;
+            while ((size_t)level < strlen(trimmed_line) && trimmed_line[level] == '#') {
                 level++;
             }
             if (level > 0 && level <= MAX_HEADING_LEVEL && (trimmed_line[level] == ' ' || trimmed_line[level] == '\0')) {
-                add_parsed_line(TYPE_HEADING, level, trimmed_line + level + (trimmed_line[level] == ' ' ? 1 : 0), 0);
-                prev_line_type = TYPE_HEADING;
+                const char *heading_text = trimmed_line + level + (trimmed_line[level] == ' ' ? 1 : 0);
+                
+                // Linting logic
+                total_headings++;
+                if (level == 1) add_h1_line(current_line_num);
+                if (last_heading_level > 0 && level > last_heading_level + 1) {
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "Skipped heading level (H%d to H%d)", last_heading_level, level);
+                    add_warning(current_line_num, msg);
+                }
+                last_heading_level = level;
+                
+                if (strlen(heading_text) == 0) {
+                    add_warning(current_line_num, "Empty heading");
+                } else {
+                    if (!check_and_add_duplicate(heading_text, current_line_num)) {
+                        add_seen_heading(heading_text, current_line_num);
+                    }
+                }
+
+                add_parsed_line(TYPE_HEADING, level, heading_text, 0, current_line_num);
                 prev_line_idx = num_lines - 1;
                 continue;
             }
@@ -102,7 +241,7 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
             bool is_uniform = true;
             char marker = trimmed_line[0];
             int count = 1;
-            for (int i = 1; i < strlen(trimmed_line); i++) {
+            for (size_t i = 1; i < strlen(trimmed_line); i++) {
                 if (trimmed_line[i] != ' ' && trimmed_line[i] != marker) {
                     is_uniform = false;
                     break;
@@ -115,12 +254,29 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
                     int heading_level = (marker == '=') ? 1 : 2;
                     lines_data[prev_line_idx].type = TYPE_HEADING;
                     lines_data[prev_line_idx].level = heading_level;
+                    
+                    // Linting logic for setext
+                    total_headings++;
+                    if (heading_level == 1) add_h1_line(current_line_num);
+                    if (last_heading_level > 0 && heading_level > last_heading_level + 1) {
+                        char msg[256];
+                        snprintf(msg, sizeof(msg), "Skipped heading level (H%d to H%d)", last_heading_level, heading_level);
+                        add_warning(current_line_num, msg);
+                    }
+                    last_heading_level = heading_level;
+                    
+                    const char *heading_text = lines_data[prev_line_idx].text;
+                    if (strlen(heading_text) == 0) {
+                        add_warning(current_line_num, "Empty heading");
+                    } else {
+                        if (!check_and_add_duplicate(heading_text, current_line_num)) {
+                            add_seen_heading(heading_text, current_line_num);
+                        }
+                    }
                     prev_line_idx = -1;
-                    prev_line_type = TYPE_EMPTY; 
                     continue;
                 } else if (count >= 3 && (marker == '-' || marker == '*' || marker == '_')) {
-                    add_parsed_line(TYPE_HORIZONTAL_RULE, raw_current_indent, "", 0);
-                    prev_line_type = TYPE_HORIZONTAL_RULE;
+                    add_parsed_line(TYPE_HORIZONTAL_RULE, raw_current_indent, "", 0, current_line_num);
                     prev_line_idx = num_lines - 1;
                     continue;
                 }
@@ -132,8 +288,7 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
             int quote_indent = 1;
             while (trimmed_line[quote_indent] == '>') quote_indent++;
             if (trimmed_line[quote_indent] == ' ') quote_indent++;
-            add_parsed_line(TYPE_BLOCKQUOTE, raw_current_indent, trimmed_line + quote_indent, 0);
-            prev_line_type = TYPE_BLOCKQUOTE;
+            add_parsed_line(TYPE_BLOCKQUOTE, raw_current_indent, trimmed_line + quote_indent, 0, current_line_num);
             prev_line_idx = num_lines - 1;
             continue;
         }
@@ -154,24 +309,22 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 list_content += 4;
             }
 
-            add_parsed_line(item_type, raw_current_indent, list_content, 0); // Store raw indent
-            prev_line_type = item_type;
+            add_parsed_line(item_type, raw_current_indent, list_content, 0, current_line_num); // Store raw indent
             prev_line_idx = num_lines - 1;
             continue;
         }
 
         // Ordered List Items: Number followed by . and a space
         if (len > 0 && isdigit(trimmed_line[0])) {
-            int i = 0;
+            size_t i = 0;
             int list_num = 0;
             while (i < strlen(trimmed_line) && isdigit(trimmed_line[i])) {
                 list_num = list_num * 10 + (trimmed_line[i] - '0');
                 i++;
             }
             if (i > 0 && i < strlen(trimmed_line) && trimmed_line[i] == '.' && 
-                (strlen(trimmed_line) > i + 1 && trimmed_line[i+1] == ' ')) {
-                add_parsed_line(TYPE_ORDERED_LIST_ITEM, raw_current_indent, trimmed_line + i + 2, list_num); // Store raw indent
-                prev_line_type = TYPE_ORDERED_LIST_ITEM;
+                (strlen(trimmed_line) > (size_t)(i + 1) && trimmed_line[i+1] == ' ')) {
+                add_parsed_line(TYPE_ORDERED_LIST_ITEM, raw_current_indent, trimmed_line + i + 2, list_num, current_line_num); // Store raw indent
                 prev_line_idx = num_lines - 1;
                 continue;
             }
@@ -188,21 +341,24 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
 
         // Regular content or empty line
         if (!is_empty) {
-            add_parsed_line(TYPE_CONTENT, raw_current_indent, line_buffer, 0); // Store content with its raw indent
-            prev_line_type = TYPE_CONTENT;
+            add_parsed_line(TYPE_CONTENT, raw_current_indent, line_buffer, 0, current_line_num); // Store content with its raw indent
             prev_line_idx = num_lines - 1;
         } else {
-            if (max_level_filter == MAX_AWK_LEVEL) {
-                 add_parsed_line(TYPE_EMPTY, 0, "", 0);
-                 prev_line_type = TYPE_EMPTY;
+            if (config->max_level_filter == MAX_AWK_LEVEL) {
+                 add_parsed_line(TYPE_EMPTY, 0, "", 0, current_line_num);
                  prev_line_idx = num_lines - 1;
             } else {
-                 prev_line_type = TYPE_EMPTY; 
                  prev_line_idx = -1;
             }
         }
     }
+
     fclose(fp);
+
+    if (total_headings == 0 && current_line_num > 0) {
+        add_warning(current_line_num, "File contains no headings");
+    }
+
 
     // --- Second Pass: Print formatted output ---
 
@@ -213,6 +369,14 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
         last_sibling_status[i] = false;
     }
     
+    // Calculate max digits
+    int max_digits = 1;
+    int temp = current_line_num;
+    while (temp > 9) {
+        max_digits++;
+        temp /= 10;
+    }
+
     for (int i = 0; i < num_lines; i++) {
         ParsedLine *current_line = &lines_data[i];
 
@@ -223,13 +387,13 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
         bool is_last_sibling_in_current_scope = true;
 
         // Filtering logic
-        if (current_line->type == TYPE_HEADING && current_line->level > max_level_filter) {
+        if (current_line->type == TYPE_HEADING && current_line->level > config->max_level_filter) {
             continue;
         }
-        if ((current_line->type != TYPE_HEADING) && max_level_filter != MAX_AWK_LEVEL) {
+        if ((current_line->type != TYPE_HEADING) && config->max_level_filter != MAX_AWK_LEVEL) {
             continue;
         }
-        if (current_line->type == TYPE_EMPTY && strlen(current_line->text) == 0 && max_level_filter != MAX_AWK_LEVEL) {
+        if (current_line->type == TYPE_EMPTY && strlen(current_line->text) == 0 && config->max_level_filter != MAX_AWK_LEVEL) {
              continue; 
         }
 
@@ -266,7 +430,7 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 strcat(prefix, TEE_STR);
             }
             
-            snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
+            if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
             // Apply colors based on heading level
             switch (current_line->level) {
                 case 1: print_formatted_text(current_line->text, COLOR_BOLD COLOR_BRIGHT_YELLOW, COLOR_RESET); break;
@@ -356,10 +520,11 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
                         strcat(subsequent_prefix, INDENT_STR);
                     }
 
-                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
+                    if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
                     char *code_text = current_line->text;
                     char *newline_pos;
                     bool first_line = true;
+                    int current_cb_line = current_line->original_line_num;
                     
                     if (code_text[0] == '\0') {
                         printf("%s%s\n", COLOR_CYAN, COLOR_RESET);
@@ -367,30 +532,32 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
                         while ((newline_pos = strchr(code_text, '\n')) != NULL) {
                             *newline_pos = '\0';
                             if (first_line) {
+                                current_cb_line++;
                                 printf("%s%s%s\n", COLOR_CYAN, code_text, COLOR_RESET);
                                 first_line = false;
                             } else {
-                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); printf("%s%s%s%s\n", full_sub_prefix, COLOR_CYAN, code_text, COLOR_RESET);
+                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET); } printf("%s%s%s%s\n", full_sub_prefix, COLOR_CYAN, code_text, COLOR_RESET);
                             }
                             *newline_pos = '\n';
                             code_text = newline_pos + 1;
                         }
                         if (*code_text != '\0' || !first_line) {
                             if (first_line) {
+                                current_cb_line++;
                                 printf("%s%s%s\n", COLOR_CYAN, code_text, COLOR_RESET);
                             } else if (*code_text != '\0') {
-                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); printf("%s%s%s%s\n", full_sub_prefix, COLOR_CYAN, code_text, COLOR_RESET);
+                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET); } printf("%s%s%s%s\n", full_sub_prefix, COLOR_CYAN, code_text, COLOR_RESET);
                             }
                         }
                     }
                 } else if (current_line->type == TYPE_BLOCKQUOTE) {
-                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s> %s", full_prefix, COLOR_DIM, COLOR_RESET);
+                    if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s> %s", full_prefix, COLOR_DIM, COLOR_RESET);
                     print_formatted_text(current_line->text, COLOR_BRIGHT_GREEN, COLOR_RESET);
                     printf("\n");
                 } else if (current_line->type == TYPE_HORIZONTAL_RULE) {
-                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s──────────%s\n", full_prefix, COLOR_DIM, COLOR_RESET);
+                    if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s──────────%s\n", full_prefix, COLOR_DIM, COLOR_RESET);
                 } else {
-                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix); 
+                    if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix); 
                     print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET);
                     printf("\n");
                 }
@@ -408,13 +575,13 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 }
                 
                 if (current_line->type == TYPE_TASK_LIST_ITEM_CHECKED) {
-                    printf("%s%s[%s✓%s%s] ", prefix, COLOR_DIM, COLOR_BRIGHT_GREEN, COLOR_RESET, COLOR_DIM);
+                    char full_item_prefix[MAX_LINE_LENGTH]; snprintf(full_item_prefix, sizeof(full_item_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } printf("%s%s[%s✓%s%s] ", full_item_prefix, COLOR_DIM, COLOR_BRIGHT_GREEN, COLOR_RESET, COLOR_DIM);
                     print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
                 } else if (current_line->type == TYPE_TASK_LIST_ITEM_UNCHECKED) {
-                    printf("%s%s[ ] %s", prefix, COLOR_DIM, COLOR_RESET);
+                    char full_item_prefix[MAX_LINE_LENGTH]; snprintf(full_item_prefix, sizeof(full_item_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } printf("%s%s[ ] %s", full_item_prefix, COLOR_DIM, COLOR_RESET);
                     print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
                 } else {
-                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s", full_prefix, BULLET_POINT); 
+                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } printf("%s%s", full_prefix, BULLET_POINT); 
                     print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
                 }
                 printf("\n");
@@ -427,7 +594,7 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 for (int j = 0; j < current_raw_indent_blocks; j++) {
                     strcat(prefix, INDENT_STR);
                 }
-                snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s%d.%s ", full_prefix, COLOR_BRIGHT_BLUE, current_line->list_number, COLOR_RESET); 
+                snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s │ ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } printf("%s%s%d.%s ", full_prefix, COLOR_BRIGHT_BLUE, current_line->list_number, COLOR_RESET); 
                 print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET); 
                 printf("\n");
             }
@@ -444,6 +611,40 @@ void process_markdown_file(const char *md_file_path, const char *global_prefix, 
         }
     }
 
+
+    // Print Warnings
+    bool has_any_warnings = (num_warnings > 0) || (num_h1s > 1);
+    for (int i = 0; i < num_seen_headings; i++) {
+        if (seen_headings[i].num_duplicates > 0) {
+            has_any_warnings = true;
+            break;
+        }
+    }
+
+    if (!config->suppress_warnings && has_any_warnings) {
+        printf("\n%s────────── Linter Warnings ──────────%s\n", COLOR_BRIGHT_YELLOW, COLOR_RESET);
+        for (int j = 0; j < num_warnings; j++) {
+            printf("%sLine %d: %s%s\n", COLOR_YELLOW, warnings[j].line_number, warnings[j].message, COLOR_RESET);
+        }
+        
+        if (num_h1s > 1) {
+            printf("%sLine %d: Multiple H1 headings detected (also at lines ", COLOR_YELLOW, h1_lines[0]);
+            for (int i = 1; i < num_h1s; i++) {
+                printf("%d%s", h1_lines[i], i == num_h1s - 1 ? "" : ", ");
+            }
+            printf(")%s\n", COLOR_RESET);
+        }
+        
+        for (int i = 0; i < num_seen_headings; i++) {
+            if (seen_headings[i].num_duplicates > 0) {
+                printf("%sLine %d: Duplicate heading: '%s' (also at lines ", COLOR_YELLOW, seen_headings[i].first_line, seen_headings[i].text);
+                for (int j = 0; j < seen_headings[i].num_duplicates; j++) {
+                    printf("%d%s", seen_headings[i].duplicate_lines[j], j == seen_headings[i].num_duplicates - 1 ? "" : ", ");
+                }
+                printf(")%s\n", COLOR_RESET);
+            }
+        }
+    }
 
     cleanup();
 }
