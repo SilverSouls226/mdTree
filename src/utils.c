@@ -25,6 +25,8 @@ void display_help() {
     printf("  -f, --find <string>    Search the file for the given string (case-sensitive) and show only matched lines and their parent headings.\n");
     printf("  -i, --case-insensitive Make the search case-insensitive when used with -f or -r.\n");
     printf("  -r, --regex <regex>    Search the file using a regular expression.\n");
+    printf("  -I, --ignore <regex>   Ignore headings (and their children) matching the regex.\n");
+    printf("  -H, --headings-only    Strictly show only headings (like a Table of Contents).\n");
     printf("  -c, --no-color         Disable colored output.\n");
     printf("  -a, --ascii            Use ASCII characters for tree branches instead of box-drawing characters.\n");
     printf("  -s, --stats            Print statistics about parsed files at the end.\n");

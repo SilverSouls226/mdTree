@@ -99,6 +99,8 @@ typedef struct {
     bool no_color;
     bool ascii_tree;
     bool show_stats;
+    bool headings_only;
+    char *ignore_query;
 } Config;
 
 #endif

@@ -116,7 +116,9 @@ void add_parsed_line(LineType type, int level, const char *text, int list_number
     num_lines++;
 }
 
-static bool is_line_filtered(Config *config, bool *should_print_cache, ParsedLine *line, int line_idx) {
+static bool is_line_filtered(Config *config, bool *should_print_cache, bool *is_ignored, ParsedLine *line, int line_idx) {
+    if (is_ignored && is_ignored[line_idx]) return true;
+    if (config->headings_only && line->type != TYPE_HEADING) return true;
     if (should_print_cache && !should_print_cache[line_idx]) return true;
     if (line->type == TYPE_HEADING && line->level > config->max_level_filter) return true;
     if (line->type != TYPE_HEADING && config->max_level_filter != MAX_AWK_LEVEL) return true;
@@ -375,6 +377,38 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
 
     // --- Second Pass: Print formatted output ---
     
+    bool *is_ignored = calloc(num_lines, sizeof(bool));
+    if (config->ignore_query) {
+        regex_t ignore_regex;
+        bool ignore_regex_compiled = false;
+        int cflags = REG_EXTENDED;
+        if (config->case_insensitive_search) cflags |= REG_ICASE;
+        if (regcomp(&ignore_regex, config->ignore_query, cflags) == 0) {
+            ignore_regex_compiled = true;
+        } else {
+            fprintf(stderr, "Warning: Failed to compile ignore regex '%s'\n", config->ignore_query);
+        }
+
+        int current_ignored_level = -1;
+        for (int i = 0; i < num_lines; i++) {
+            ParsedLine *line = &lines_data[i];
+            if (line->type == TYPE_HEADING) {
+                if (current_ignored_level != -1 && line->level <= current_ignored_level) {
+                    current_ignored_level = -1;
+                }
+                if (current_ignored_level == -1 && ignore_regex_compiled) {
+                    if (regexec(&ignore_regex, line->text, 0, NULL, 0) == 0) {
+                        current_ignored_level = line->level;
+                    }
+                }
+            }
+            if (current_ignored_level != -1) {
+                is_ignored[i] = true;
+            }
+        }
+        if (ignore_regex_compiled) regfree(&ignore_regex);
+    }
+
     bool *should_print_cache = NULL;
     if (config->search_query) {
         regex_t regex;
@@ -391,6 +425,8 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
 
         should_print_cache = calloc(num_lines, sizeof(bool));
         for (int i = 0; i < num_lines; i++) {
+            if (is_ignored[i]) continue;
+            if (config->headings_only && lines_data[i].type != TYPE_HEADING) continue;
             char *text_to_search = lines_data[i].text;
             bool found = false;
             if (config->use_regex) {
@@ -450,6 +486,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
             }
         }
         if (!has_matches) {
+            if (is_ignored) free(is_ignored);
             free(should_print_cache);
             cleanup();
             return false;
@@ -485,7 +522,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
         bool is_last_sibling_in_current_scope = true;
 
         // Filtering logic
-        if (is_line_filtered(config, should_print_cache, current_line, i)) continue;
+        if (is_line_filtered(config, should_print_cache, is_ignored, current_line, i)) continue;
 
         if (config->show_stats) {
             if (current_line->type == TYPE_HEADING) {
@@ -511,7 +548,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                         break; // Scope ended, so it is the last sibling
                     }
                     if (next_line->level == current_line->level) {
-                        if (!is_line_filtered(config, should_print_cache, next_line, k)) {
+                        if (!is_line_filtered(config, should_print_cache, is_ignored, next_line, k)) {
                             is_last_sibling_in_current_scope = false;
                             break;
                         }
@@ -587,7 +624,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 if (next_line->type == TYPE_HEADING && next_line->level <= parent_heading_level) {
                     break; // Reached end of parent scope
                 }
-                if (!is_line_filtered(config, should_print_cache, next_line, k)) {
+                if (!is_line_filtered(config, should_print_cache, is_ignored, next_line, k)) {
                     if (next_line->type == TYPE_CONTENT || next_line->type == TYPE_CODE_BLOCK_CONTENT || 
                         next_line->type == TYPE_BLOCKQUOTE || next_line->type == TYPE_HORIZONTAL_RULE) {
                         // Only a normal line, code block, blockquote, or HR causes the vertical line to continue
@@ -753,6 +790,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
         }
     }
 
+    if (is_ignored) free(is_ignored);
     if (should_print_cache) free(should_print_cache);
     cleanup();
     return true;

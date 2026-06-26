@@ -73,7 +73,7 @@ void process_directory(const char *dirpath, const char *global_prefix, Config *c
 }
 int main(int argc, char *argv[]) {
 
-    Config config = { MAX_AWK_LEVEL, false, false, NULL, false, false, false, false, false };
+    Config config = { MAX_AWK_LEVEL, false, false, NULL, false, false, false, false, false, false, NULL };
     int opt;
     int option_index = 0;
     static struct option long_options[] = {
@@ -88,10 +88,12 @@ int main(int argc, char *argv[]) {
         {"no-color", no_argument, 0, 'c' },
         {"ascii", no_argument, 0, 'a' },
         {"stats", no_argument, 0, 's' },
+        {"ignore", required_argument, 0, 'I' },
+        {"headings-only", no_argument, 0, 'H' },
         {0,      0,           0,   0  }
     };
 
-    while ((opt = getopt_long(argc, argv, "d:hnwvf:ir:cas", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "d:hnwvf:ir:casI:H", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'd':
                 config.max_level_filter = atoi(optarg);
@@ -129,6 +131,12 @@ int main(int argc, char *argv[]) {
                 break;
             case 's':
                 config.show_stats = true;
+                break;
+            case 'I':
+                config.ignore_query = optarg;
+                break;
+            case 'H':
+                config.headings_only = true;
                 break;
             case 'h':
                 display_help();
