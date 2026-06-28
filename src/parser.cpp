@@ -14,7 +14,7 @@ int capacity_warnings = 0;
 void add_warning(int line_number, const char *msg) {
     if (num_warnings >= capacity_warnings) {
         capacity_warnings = (capacity_warnings == 0) ? 10 : capacity_warnings * 2;
-        warnings = realloc(warnings, capacity_warnings * sizeof(LintWarning));
+        warnings = (LintWarning*)realloc(warnings, capacity_warnings * sizeof(LintWarning));
     }
     warnings[num_warnings].line_number = line_number;
     strncpy(warnings[num_warnings].message, msg, 255);
@@ -37,7 +37,7 @@ int capacity_seen_headings = 0;
 void add_seen_heading(const char *text, int line_num) {
     if (num_seen_headings >= capacity_seen_headings) {
         capacity_seen_headings = (capacity_seen_headings == 0) ? 10 : capacity_seen_headings * 2;
-        seen_headings = realloc(seen_headings, capacity_seen_headings * sizeof(SeenHeading));
+        seen_headings = (SeenHeading*)realloc(seen_headings, capacity_seen_headings * sizeof(SeenHeading));
     }
     seen_headings[num_seen_headings].text = strdup(text);
     seen_headings[num_seen_headings].first_line = line_num;
@@ -53,7 +53,7 @@ bool check_and_add_duplicate(const char *text, int line_num) {
             SeenHeading *sh = &seen_headings[i];
             if (sh->num_duplicates >= sh->capacity_duplicates) {
                 sh->capacity_duplicates = (sh->capacity_duplicates == 0) ? 5 : sh->capacity_duplicates * 2;
-                sh->duplicate_lines = realloc(sh->duplicate_lines, sh->capacity_duplicates * sizeof(int));
+                sh->duplicate_lines = (int*)realloc(sh->duplicate_lines, sh->capacity_duplicates * sizeof(int));
             }
             sh->duplicate_lines[sh->num_duplicates++] = line_num;
             return true;
@@ -69,7 +69,7 @@ int capacity_h1s = 0;
 void add_h1_line(int line_num) {
     if (num_h1s >= capacity_h1s) {
         capacity_h1s = (capacity_h1s == 0) ? 10 : capacity_h1s * 2;
-        h1_lines = realloc(h1_lines, capacity_h1s * sizeof(int));
+        h1_lines = (int*)realloc(h1_lines, capacity_h1s * sizeof(int));
     }
     h1_lines[num_h1s++] = line_num;
 }
@@ -97,7 +97,7 @@ void cleanup_warnings() {
 void add_parsed_line(LineType type, int level, const char *text, int list_number, int line_number) {
     if (num_lines >= capacity_lines) {
         capacity_lines = (capacity_lines == 0) ? 100 : capacity_lines * 2;
-        ParsedLine *new_lines_data = realloc(lines_data, capacity_lines * sizeof(ParsedLine));
+        ParsedLine *new_lines_data = (ParsedLine*)realloc(lines_data, capacity_lines * sizeof(ParsedLine));
         if (new_lines_data == NULL) {
             perror("Failed to reallocate memory for lines_data");
             exit(EXIT_FAILURE);
@@ -227,7 +227,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
             ParsedLine *last_line = &lines_data[num_lines - 1];
             int old_len = strlen(last_line->text);
             int new_len = old_len + strlen(line_buffer) + 2; // +1 for \n, +1 for \0
-            char *new_text = malloc(new_len);
+            char *new_text = (char*)malloc(new_len);
             strcpy(new_text, last_line->text);
             if (old_len > 0) {
                 strcat(new_text, "\n");
@@ -337,7 +337,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 ParsedLine *last_line = &lines_data[prev_line_idx];
                 int old_len = strlen(last_line->text);
                 int new_len = old_len + strlen(trimmed_line) + 2;
-                char *new_text = malloc(new_len);
+                char *new_text = (char*)malloc(new_len);
                 strcpy(new_text, last_line->text);
                 strcat(new_text, "\n");
                 strcat(new_text, trimmed_line);
@@ -393,7 +393,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 ParsedLine *last_line = &lines_data[prev_line_idx];
                 int old_len = strlen(last_line->text);
                 int new_len = old_len + strlen(line_buffer) + 2;
-                char *new_text = malloc(new_len);
+                char *new_text = (char*)malloc(new_len);
                 strcpy(new_text, last_line->text);
                 if (old_len > 0) strcat(new_text, "\n");
                 strcat(new_text, line_buffer);
@@ -438,7 +438,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
 
     // --- Second Pass: Print formatted output ---
     
-    bool *is_ignored = calloc(num_lines, sizeof(bool));
+    bool *is_ignored = (bool*)calloc(num_lines, sizeof(bool));
     if (config->ignore_query) {
         regex_t ignore_regex;
         bool ignore_regex_compiled = false;
@@ -484,7 +484,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
             }
         }
 
-        should_print_cache = calloc(num_lines, sizeof(bool));
+        should_print_cache = (bool*)calloc(num_lines, sizeof(bool));
         for (int i = 0; i < num_lines; i++) {
             if (is_ignored[i]) continue;
             if (config->headings_only && lines_data[i].type != TYPE_HEADING) continue;

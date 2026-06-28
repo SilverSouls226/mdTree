@@ -4,7 +4,7 @@
 
 bool g_no_color = false;
 bool g_ascii_tree = false;
-Stats g_stats = {0};
+Stats g_stats = {};
 
 const char *PIPE_STR = "│   ";
 const char *ELBOW_STR = "└── ";
@@ -161,7 +161,7 @@ void print_formatted_text(const char *text, const char *initial_color_code, cons
             }
         } else if (*current == '~') {
             int num_tildes = (*(current + 1) == '~') ? 2 : 1;
-            char *search_str = (num_tildes == 2) ? "~~" : "~";
+            const char *search_str = (num_tildes == 2) ? "~~" : "~";
             char *end = strstr(current + num_tildes, search_str);
             if (end) {
                 *end = '\0';
