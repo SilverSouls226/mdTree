@@ -145,6 +145,20 @@ void print_formatted_text(const char *text, const char *initial_color_code, cons
                 printf("**");
                 current += 2;
             }
+        } else if (strncmp(current, "==", 2) == 0) {
+            char *end = strstr(current + 2, "==");
+            if (end) {
+                *end = '\0';
+                char new_color[128];
+                snprintf(new_color, sizeof(new_color), "%s\033[7m", initial_color_code);
+                print_formatted_text(current + 2, new_color, "");
+                *end = '=';
+                printf("\033[27m%s", initial_color_code); // 27m resets reverse video (highlight)
+                current = end + 2;
+            } else {
+                printf("==");
+                current += 2;
+            }
         } else if (*current == '~') {
             int num_tildes = (*(current + 1) == '~') ? 2 : 1;
             char *search_str = (num_tildes == 2) ? "~~" : "~";

@@ -137,6 +137,39 @@ void cleanup() {
     capacity_lines = 0;
 }
 
+static int get_actual_parent_level(int line_idx) {
+    ParsedLine *current_line = &lines_data[line_idx];
+    for (int k = line_idx - 1; k >= 0; k--) {
+        ParsedLine *prev_line = &lines_data[k];
+        if (prev_line->type == TYPE_HEADING) {
+            if (prev_line->level < current_line->level) {
+                return prev_line->level;
+            }
+        }
+    }
+    return 0;
+}
+
+static bool is_last_sibling_for_level(int line_idx, int target_level, Config *config, bool *should_print_cache, bool *is_ignored) {
+    for (int k = line_idx + 1; k < num_lines; k++) {
+        ParsedLine *next_line = &lines_data[k];
+        if (next_line->type == TYPE_HEADING) {
+            if (is_line_filtered(config, should_print_cache, is_ignored, next_line, k)) {
+                continue;
+            }
+            int apl = get_actual_parent_level(k);
+            if (apl < target_level) {
+                if (target_level == apl + 1) {
+                    return false; // Found a sibling that attaches here
+                } else {
+                    return true; // Scope ended (jumped out horizontally or vertically)
+                }
+            }
+        }
+    }
+    return true; // Reached end of file
+}
+
 bool process_markdown_file(const char *md_file_path, const char *global_prefix, Config *config, const char *item_prefix, const char *filename) {
     FILE *fp = fopen(md_file_path, "r");
     if (config->show_stats) {
@@ -300,11 +333,20 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
 
         // Blockquotes
         if (len > 0 && trimmed_line[0] == '>') {
-            int quote_indent = 1;
-            while (trimmed_line[quote_indent] == '>') quote_indent++;
-            if (trimmed_line[quote_indent] == ' ') quote_indent++;
-            add_parsed_line(TYPE_BLOCKQUOTE, raw_current_indent, trimmed_line + quote_indent, 0, current_line_num);
-            prev_line_idx = num_lines - 1;
+            if (prev_line_idx != -1 && lines_data[prev_line_idx].type == TYPE_BLOCKQUOTE) {
+                ParsedLine *last_line = &lines_data[prev_line_idx];
+                int old_len = strlen(last_line->text);
+                int new_len = old_len + strlen(trimmed_line) + 2;
+                char *new_text = malloc(new_len);
+                strcpy(new_text, last_line->text);
+                strcat(new_text, "\n");
+                strcat(new_text, trimmed_line);
+                free(last_line->text);
+                last_line->text = new_text;
+            } else {
+                add_parsed_line(TYPE_BLOCKQUOTE, raw_current_indent, trimmed_line, 0, current_line_num);
+                prev_line_idx = num_lines - 1;
+            }
             continue;
         }
 
@@ -343,6 +385,25 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 prev_line_idx = num_lines - 1;
                 continue;
             }
+        }
+
+        // Table row parsing
+        if (len > 0 && trimmed_line[0] == '|') {
+            if (prev_line_idx != -1 && lines_data[prev_line_idx].type == TYPE_TABLE_CONTENT) {
+                ParsedLine *last_line = &lines_data[prev_line_idx];
+                int old_len = strlen(last_line->text);
+                int new_len = old_len + strlen(line_buffer) + 2;
+                char *new_text = malloc(new_len);
+                strcpy(new_text, last_line->text);
+                if (old_len > 0) strcat(new_text, "\n");
+                strcat(new_text, line_buffer);
+                free(last_line->text);
+                last_line->text = new_text;
+            } else {
+                add_parsed_line(TYPE_TABLE_CONTENT, raw_current_indent, line_buffer, 0, current_line_num);
+                prev_line_idx = num_lines - 1;
+            }
+            continue;
         }
 
         // Check if trimmed_line is actually empty
@@ -474,9 +535,6 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
         }
     }
 
-    // last_sibling_status[level] is true if the item at 'level' is the last sibling,
-    // meaning subsequent items at higher levels (deeper indent) should use 'INDENT_STR' instead of 'PIPE_STR'
-
     if (config->search_query) {
         bool has_matches = false;
         for (int i = 0; i < num_lines; i++) {
@@ -495,11 +553,6 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
 
     if (filename) {
         printf("%s%s\n", item_prefix ? item_prefix : "", filename);
-    }
-
-    bool last_sibling_status[MAX_HEADING_LEVEL + 1]; 
-    for (int i = 0; i <= MAX_HEADING_LEVEL; i++) {
-        last_sibling_status[i] = false;
     }
     
     // Calculate max digits
@@ -528,7 +581,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
             if (current_line->type == TYPE_HEADING) {
                 g_stats.headings++;
                 g_stats.words += count_words(current_line->text);
-            } else if (current_line->type == TYPE_CONTENT || current_line->type == TYPE_BLOCKQUOTE || current_line->type == TYPE_CODE_BLOCK_CONTENT) {
+            } else if (current_line->type == TYPE_CONTENT || current_line->type == TYPE_BLOCKQUOTE || current_line->type == TYPE_CODE_BLOCK_CONTENT || current_line->type == TYPE_TABLE_CONTENT) {
                 g_stats.words += count_words(current_line->text);
             } else if (current_line->type == TYPE_UNORDERED_LIST_ITEM || current_line->type == TYPE_ORDERED_LIST_ITEM || current_line->type == TYPE_TASK_LIST_ITEM_CHECKED || current_line->type == TYPE_TASK_LIST_ITEM_UNCHECKED) {
                 g_stats.lists++;
@@ -539,37 +592,45 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
         if (current_line->type == TYPE_HEADING) {
             current_logical_level = current_line->level - 1;
 
+            // Determine actual parent level to handle jumps
+            int actual_parent_level = get_actual_parent_level(i);
+
             // Determine if current heading is the last sibling at its level
-            is_last_sibling_in_current_scope = true;
-            for (int k = i + 1; k < num_lines; k++) {
-                ParsedLine *next_line = &lines_data[k];
-                if (next_line->type == TYPE_HEADING) {
-                    if (next_line->level < current_line->level) {
-                        break; // Scope ended, so it is the last sibling
-                    }
-                    if (next_line->level == current_line->level) {
-                        if (!is_line_filtered(config, should_print_cache, is_ignored, next_line, k)) {
-                            is_last_sibling_in_current_scope = false;
-                            break;
-                        }
-                    }
-                }
-            }
+            is_last_sibling_in_current_scope = is_last_sibling_for_level(i, current_line->level, config, should_print_cache, is_ignored);
             
+            bool has_skipped_levels = (actual_parent_level < current_line->level - 1);
+
             // Build the prefix based on parent heading status
             for (int j = 0; j < current_logical_level; j++) {
-                if (last_sibling_status[j]) {
-                    strcat(prefix, INDENT_STR);
+                int target_level = j + 1;
+                if (target_level <= actual_parent_level) {
+                    if (is_last_sibling_for_level(i, target_level, config, should_print_cache, is_ignored)) {
+                        strcat(prefix, INDENT_STR);
+                    } else {
+                        strcat(prefix, PIPE_STR);
+                    }
                 } else {
-                    strcat(prefix, PIPE_STR);
+                    if (target_level == actual_parent_level + 1) {
+                        if (is_last_sibling_for_level(i, target_level, config, should_print_cache, is_ignored)) {
+                            strcat(prefix, g_ascii_tree ? "`---" : "└───");
+                        } else {
+                            strcat(prefix, g_ascii_tree ? "|---" : "├───");
+                        }
+                    } else {
+                        strcat(prefix, g_ascii_tree ? "----" : "────");
+                    }
                 }
             }
 
             // Append current item's tree symbol
-            if (is_last_sibling_in_current_scope) {
-                strcat(prefix, ELBOW_STR);
+            if (has_skipped_levels) {
+                strcat(prefix, g_ascii_tree ? "--- " : "─── ");
             } else {
-                strcat(prefix, TEE_STR);
+                if (is_last_sibling_in_current_scope) {
+                    strcat(prefix, ELBOW_STR);
+                } else {
+                    strcat(prefix, TEE_STR);
+                }
             }
             
             if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
@@ -584,12 +645,6 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 default: print_formatted_text(current_line->text, COLOR_RESET, COLOR_RESET); break;
             }
             printf("\n");
-
-            // Update last_sibling_status for the current level and reset deeper levels
-            last_sibling_status[current_logical_level] = is_last_sibling_in_current_scope;
-            for (int j = current_logical_level + 1; j <= MAX_HEADING_LEVEL; j++) {
-                last_sibling_status[j] = false;
-            }
 
         } else { // TYPE_UNORDERED_LIST_ITEM, TYPE_ORDERED_LIST_ITEM, TYPE_CONTENT, TYPE_EMPTY
             // Find the closest preceding heading's level
@@ -610,7 +665,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
 
             // Build base prefix based on parent heading status
             for (int j = 0; j < current_logical_level; j++) {
-                if (last_sibling_status[j]) {
+                if (is_last_sibling_for_level(i, j + 1, config, should_print_cache, is_ignored)) {
                     strcat(prefix, INDENT_STR);
                 } else {
                     strcat(prefix, PIPE_STR);
@@ -626,7 +681,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 }
                 if (!is_line_filtered(config, should_print_cache, is_ignored, next_line, k)) {
                     if (next_line->type == TYPE_CONTENT || next_line->type == TYPE_CODE_BLOCK_CONTENT || 
-                        next_line->type == TYPE_BLOCKQUOTE || next_line->type == TYPE_HORIZONTAL_RULE) {
+                        next_line->type == TYPE_BLOCKQUOTE || next_line->type == TYPE_HORIZONTAL_RULE || next_line->type == TYPE_TABLE_CONTENT) {
                         // Only a normal line, code block, blockquote, or HR causes the vertical line to continue
                         is_last_child = false;
                         break;
@@ -638,14 +693,22 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
             int current_raw_indent_blocks = current_line->level / 4;
             
             if (current_line->type == TYPE_CONTENT || current_line->type == TYPE_CODE_BLOCK_CONTENT ||
-                current_line->type == TYPE_BLOCKQUOTE || current_line->type == TYPE_HORIZONTAL_RULE) {
+                current_line->type == TYPE_BLOCKQUOTE || current_line->type == TYPE_HORIZONTAL_RULE || current_line->type == TYPE_TABLE_CONTENT) {
                 char base_prefix[MAX_LINE_LENGTH];
                 strcpy(base_prefix, prefix);
 
-                if (is_last_child) {
-                    strcat(prefix, ELBOW_STR);
+                if (current_line->type == TYPE_HORIZONTAL_RULE) {
+                    if (is_last_child) {
+                        strcat(prefix, g_ascii_tree ? "`---" : "└───");
+                    } else {
+                        strcat(prefix, g_ascii_tree ? "|---" : "├───");
+                    }
                 } else {
-                    strcat(prefix, TEE_STR);
+                    if (is_last_child) {
+                        strcat(prefix, ELBOW_STR);
+                    } else {
+                        strcat(prefix, TEE_STR);
+                    }
                 }
                 // Add list item indentation spacing if content is nested inside list
                 for (int j = 0; j < current_raw_indent_blocks; j++) {
@@ -694,12 +757,103 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                             }
                         }
                     }
-                } else if (current_line->type == TYPE_BLOCKQUOTE) {
-                    if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s> %s", full_prefix, COLOR_DIM, COLOR_RESET);
-                    print_formatted_text(current_line->text, COLOR_BRIGHT_GREEN, COLOR_RESET);
-                    printf("\n");
+                } else if (current_line->type == TYPE_TABLE_CONTENT || current_line->type == TYPE_BLOCKQUOTE) {
+                    char subsequent_prefix[MAX_LINE_LENGTH];
+                    strcpy(subsequent_prefix, base_prefix);
+                    if (is_last_child) {
+                        strcat(subsequent_prefix, INDENT_STR);
+                    } else {
+                        strcat(subsequent_prefix, PIPE_STR);
+                    }
+                    for (int j = 0; j < current_raw_indent_blocks; j++) {
+                        strcat(subsequent_prefix, INDENT_STR);
+                    }
+
+                    if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
+                    char *code_text = current_line->text;
+                    char *newline_pos;
+                    bool first_line = true;
+                    int current_cb_line = current_line->original_line_num;
+                    
+                    const char *color_code = (current_line->type == TYPE_BLOCKQUOTE) ? COLOR_BRIGHT_GREEN : COLOR_BRIGHT_WHITE;
+                    
+                    if (code_text[0] == '\0') {
+                        printf("\n");
+                    } else {
+                        while ((newline_pos = strchr(code_text, '\n')) != NULL) {
+                            *newline_pos = '\0';
+                            
+                            char *display_text = code_text;
+                            int bq_level = 0;
+                            if (current_line->type == TYPE_BLOCKQUOTE) {
+                                while (*display_text == '>' || *display_text == ' ') {
+                                    if (*display_text == '>') bq_level++;
+                                    display_text++;
+                                }
+                                if (bq_level < 1) bq_level = 1;
+                            }
+                            
+                            if (first_line) {
+                                current_cb_line++;
+                                if (current_line->type == TYPE_BLOCKQUOTE) {
+                                    for (int i = 0; i < bq_level - 1; i++) printf("%s", INDENT_STR);
+                                    printf("%s>%s ", COLOR_DIM, COLOR_RESET);
+                                    print_formatted_text(display_text, color_code, COLOR_RESET);
+                                } else {
+                                    print_formatted_text(code_text, color_code, COLOR_RESET);
+                                }
+                                printf("\n");
+                                first_line = false;
+                            } else {
+                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET, VLINE_STR); } printf("%s", full_sub_prefix);
+                                if (current_line->type == TYPE_BLOCKQUOTE) {
+                                    for (int i = 0; i < bq_level - 1; i++) printf("%s", INDENT_STR);
+                                    printf("%s>%s ", COLOR_DIM, COLOR_RESET);
+                                    print_formatted_text(display_text, color_code, COLOR_RESET);
+                                } else {
+                                    print_formatted_text(code_text, color_code, COLOR_RESET);
+                                }
+                                printf("\n");
+                            }
+                            *newline_pos = '\n';
+                            code_text = newline_pos + 1;
+                        }
+                        if (*code_text != '\0' || !first_line) {
+                            char *display_text = code_text;
+                            int bq_level = 0;
+                            if (current_line->type == TYPE_BLOCKQUOTE && *code_text != '\0') {
+                                while (*display_text == '>' || *display_text == ' ') {
+                                    if (*display_text == '>') bq_level++;
+                                    display_text++;
+                                }
+                                if (bq_level < 1) bq_level = 1;
+                            }
+                            
+                            if (first_line) {
+                                current_cb_line++;
+                                if (current_line->type == TYPE_BLOCKQUOTE && *code_text != '\0') {
+                                    for (int i = 0; i < bq_level - 1; i++) printf("%s", INDENT_STR);
+                                    printf("%s>%s ", COLOR_DIM, COLOR_RESET);
+                                    print_formatted_text(display_text, color_code, COLOR_RESET);
+                                } else if (*code_text != '\0') {
+                                    print_formatted_text(code_text, color_code, COLOR_RESET);
+                                }
+                                printf("\n");
+                            } else if (*code_text != '\0') {
+                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET, VLINE_STR); } printf("%s", full_sub_prefix);
+                                if (current_line->type == TYPE_BLOCKQUOTE) {
+                                    for (int i = 0; i < bq_level - 1; i++) printf("%s", INDENT_STR);
+                                    printf("%s>%s ", COLOR_DIM, COLOR_RESET);
+                                    print_formatted_text(display_text, color_code, COLOR_RESET);
+                                } else {
+                                    print_formatted_text(code_text, color_code, COLOR_RESET);
+                                }
+                                printf("\n");
+                            }
+                        }
+                    }
                 } else if (current_line->type == TYPE_HORIZONTAL_RULE) {
-                    if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s%s%s\n", full_prefix, COLOR_DIM, HLINE_STR, COLOR_RESET); //, full_prefix, COLOR_DIM, COLOR_RESET);
+                    if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s\n", full_prefix, HLINE_STR);
                 } else {
                     if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix); 
                     print_formatted_text(current_line->text, COLOR_BRIGHT_WHITE, COLOR_RESET);
@@ -743,15 +897,6 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 printf("\n");
             }
             
-            // Update last_sibling_status for content/list items:
-            // This needs to mark the level *after* the parent heading.
-            // Simplified for now: if this item is the "last_sibling_in_current_scope",
-            // then the line for its immediate parent should stop.
-            // The `last_sibling_status` array should track if the *vertical line* at that depth should continue.
-            // This is implicitly handled by how `prefix` is built.
-            // The `last_sibling_status` array is more strictly for heading levels.
-            // We need a more granular way to track branch endings for content/list blocks.
-            // For now, let's just ensure headings' status is handled correctly.
         }
     }
 

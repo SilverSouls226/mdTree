@@ -49,7 +49,7 @@ extern bool g_ascii_tree;
 #define COLOR_BOLD_BRIGHT_YELLOW (g_no_color ? "" : "\033[1m\033[93m")
 #define COLOR_BOLD_BRIGHT_CYAN   (g_no_color ? "" : "\033[1m\033[96m")
 #define VLINE_STR (g_ascii_tree ? "|" : "│")
-#define HLINE_STR (g_ascii_tree ? "----------" : "──────────")
+#define HLINE_STR (g_ascii_tree ? "------------------------------" : "──────────────────────────────")
 
 
 // --- Data Structures ---
@@ -73,7 +73,8 @@ typedef enum {
     TYPE_BLOCKQUOTE,
     TYPE_HORIZONTAL_RULE,
     TYPE_TASK_LIST_ITEM_UNCHECKED,
-    TYPE_TASK_LIST_ITEM_CHECKED
+    TYPE_TASK_LIST_ITEM_CHECKED,
+    TYPE_TABLE_CONTENT
 } LineType;
 
 typedef struct {
