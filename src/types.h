@@ -1,10 +1,12 @@
 #ifndef TYPES_H
 #define TYPES_H
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdbool.h>
+#include <iostream>
+#include <string>
+#include <vector>
+#include <cstdio>
+#include <cstring>
+#include <cstdlib>
 
 extern const char *PIPE_STR;
 extern const char *ELBOW_STR;
@@ -54,16 +56,26 @@ extern bool g_ascii_tree;
 
 // --- Data Structures ---
 
-typedef struct {
-    int files_parsed;
-    int headings;
-    int lists;
-    int words;
-} Stats;
+struct Stats {
+    int files_parsed = 0;
+    int headings = 0;
+    int lists = 0;
+    int words = 0;
+    int characters = 0;
+    int code_blocks = 0;
+    int completed_tasks = 0;
+    int incomplete_tasks = 0;
+    int links = 0;
+    int images = 0;
+    int empty_lines = 0;
+    int non_empty_lines = 0;
+    int tables = 0;
+    int blockquotes = 0;
+};
 
 extern Stats g_stats;
 
-typedef enum {
+enum LineType {
     TYPE_HEADING,
     TYPE_CONTENT,
     TYPE_UNORDERED_LIST_ITEM,
@@ -75,33 +87,33 @@ typedef enum {
     TYPE_TASK_LIST_ITEM_UNCHECKED,
     TYPE_TASK_LIST_ITEM_CHECKED,
     TYPE_TABLE_CONTENT
-} LineType;
+};
 
-typedef struct {
+struct ParsedLine {
     LineType type;
     int level; // 1-6 for headings, 0 for content/empty, raw indentation level for lists
-    char *text; // Dynamically allocated string for the line content
+    std::string text;
     int list_number; // Only used for TYPE_ORDERED_LIST_ITEM
     int original_line_num;
-} ParsedLine;
+};
 
-typedef struct {
+struct LintWarning {
     int line_number;
-    char message[256];
-} LintWarning;
+    std::string message;
+};
 
-typedef struct {
-    int max_level_filter;
-    bool show_line_numbers;
-    bool suppress_warnings;
-    char *search_query;
-    bool case_insensitive_search;
-    bool use_regex;
-    bool no_color;
-    bool ascii_tree;
-    bool show_stats;
-    bool headings_only;
-    char *ignore_query;
-} Config;
+struct Config {
+    int max_level_filter = 0;
+    bool show_line_numbers = false;
+    bool suppress_warnings = false;
+    std::string search_query = "";
+    bool case_insensitive_search = false;
+    bool use_regex = false;
+    bool no_color = false;
+    bool ascii_tree = false;
+    bool show_stats = false;
+    bool headings_only = false;
+    std::string ignore_query = "";
+};
 
 #endif

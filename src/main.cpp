@@ -73,7 +73,7 @@ void process_directory(const char *dirpath, const char *global_prefix, Config *c
 }
 int main(int argc, char *argv[]) {
 
-    Config config = { MAX_AWK_LEVEL, false, false, NULL, false, false, false, false, false, false, NULL };
+    Config config = { MAX_AWK_LEVEL, false, false, "", false, false, false, false, false, false, "" };
     int opt;
     int option_index = 0;
     static struct option long_options[] = {
@@ -180,7 +180,23 @@ int main(int argc, char *argv[]) {
     }
     
     if (config.show_stats) {
-        printf("\n\n%d files parsed, %d headings, %d list items, %d words total.\n", g_stats.files_parsed, g_stats.headings, g_stats.lists, g_stats.words);
+        printf("\n\n────────────────────────────── Statistics ──────────────────────────────\n");
+        printf("Files parsed:      %d\n", g_stats.files_parsed);
+        printf("Characters:        %d\n", g_stats.characters);
+        printf("Words:             %d (approx. %d min reading time)\n", g_stats.words, (g_stats.words / 200 > 0 ? g_stats.words / 200 : 1));
+        printf("Total lines:       %d (%d non-empty, %d empty)\n", g_stats.non_empty_lines + g_stats.empty_lines, g_stats.non_empty_lines, g_stats.empty_lines);
+        printf("\n");
+        printf("Headings:          %d\n", g_stats.headings);
+        printf("Lists:             %d\n", g_stats.lists);
+        if (g_stats.completed_tasks > 0 || g_stats.incomplete_tasks > 0) {
+            int total_tasks = g_stats.completed_tasks + g_stats.incomplete_tasks;
+            printf("Tasks:             %d (%d completed, %d incomplete - %.1f%%)\n", total_tasks, g_stats.completed_tasks, g_stats.incomplete_tasks, (g_stats.completed_tasks * 100.0) / total_tasks);
+        }
+        printf("Code blocks:       %d\n", g_stats.code_blocks);
+        printf("Tables:            %d rows\n", g_stats.tables);
+        printf("Blockquotes:       %d\n", g_stats.blockquotes);
+        printf("Links:             %d\n", g_stats.links);
+        printf("Images:            %d\n", g_stats.images);
     }
     return EXIT_SUCCESS;
 }

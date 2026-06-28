@@ -1,3 +1,4 @@
+#include <cstring>
 #include "types.h"
 #include "utils.h"
 #include <ctype.h>
