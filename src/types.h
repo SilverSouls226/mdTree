@@ -114,6 +114,7 @@ struct Config {
     bool show_stats = false;
     bool headings_only = false;
     std::string ignore_query = "";
+    bool show_hr = false;
 };
 
 #endif

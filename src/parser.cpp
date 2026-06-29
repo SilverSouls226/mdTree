@@ -78,6 +78,7 @@ static bool is_line_filtered(Config *config, bool *should_print_cache, bool *is_
     if (line->type != TYPE_HEADING && config->max_level_filter != MAX_AWK_LEVEL) return true;
     if (line->type == TYPE_EMPTY && line->text.length() == 0 && config->max_level_filter != MAX_AWK_LEVEL) return true;
     if (line->type == TYPE_EMPTY) return true;
+    if (line->type == TYPE_HORIZONTAL_RULE && !config->show_hr) return true;
     return false;
 }
 
@@ -88,13 +89,41 @@ void cleanup() {
     h1_lines.clear();
 }
 
+static int get_horizontal_rule_level(int line_idx) {
+    // Check if there is any heading after this horizontal line till EOF
+    bool has_heading_after = false;
+    for (size_t i = line_idx + 1; i < lines_data.size(); i++) {
+        if (lines_data[i].type == TYPE_HEADING) {
+            has_heading_after = true;
+            break;
+        }
+    }
+    
+    if (!has_heading_after) {
+        return 2; // Under H1 heading (level 2)
+    }
+
+    for (int k = line_idx - 1; k >= 0; k--) {
+        if (lines_data[k].type == TYPE_HEADING) {
+            return lines_data[k].level;
+        }
+    }
+    return 1; // Default to level 1 if no preceding heading
+}
+
 static int get_actual_parent_level(int line_idx) {
     ParsedLine *current_line = &lines_data[line_idx];
+    int current_level = (current_line->type == TYPE_HEADING) ? current_line->level : get_horizontal_rule_level(line_idx);
     for (int k = line_idx - 1; k >= 0; k--) {
         ParsedLine *prev_line = &lines_data[k];
         if (prev_line->type == TYPE_HEADING) {
-            if (prev_line->level < current_line->level) {
+            if (prev_line->level < current_level) {
                 return prev_line->level;
+            }
+        } else if (prev_line->type == TYPE_HORIZONTAL_RULE) {
+            int hr_level = get_horizontal_rule_level(k);
+            if (hr_level < current_level) {
+                return hr_level;
             }
         }
     }
@@ -104,7 +133,7 @@ static int get_actual_parent_level(int line_idx) {
 static bool is_last_sibling_for_level(int line_idx, int target_level, Config *config, bool *should_print_cache, bool *is_ignored) {
     for (int k = line_idx + 1; k < ((int)lines_data.size()); k++) {
         ParsedLine *next_line = &lines_data[k];
-        if (next_line->type == TYPE_HEADING) {
+        if (next_line->type == TYPE_HEADING || next_line->type == TYPE_HORIZONTAL_RULE) {
             if (is_line_filtered(config, should_print_cache, is_ignored, next_line, k)) {
                 continue;
             }
@@ -548,16 +577,17 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
             }
         }
 
-        if (current_line->type == TYPE_HEADING) {
-            current_logical_level = current_line->level - 1;
+        if (current_line->type == TYPE_HEADING || current_line->type == TYPE_HORIZONTAL_RULE) {
+            int effective_level = (current_line->type == TYPE_HEADING) ? current_line->level : get_horizontal_rule_level(i);
+            current_logical_level = effective_level - 1;
 
             // Determine actual parent level to handle jumps
             int actual_parent_level = get_actual_parent_level(i);
 
             // Determine if current heading is the last sibling at its level
-            is_last_sibling_in_current_scope = is_last_sibling_for_level(i, current_line->level, config, should_print_cache, is_ignored);
+            is_last_sibling_in_current_scope = is_last_sibling_for_level(i, effective_level, config, should_print_cache, is_ignored);
             
-            bool has_skipped_levels = (actual_parent_level < current_line->level - 1);
+            bool has_skipped_levels = (actual_parent_level < effective_level - 1);
 
             // Build the prefix based on parent heading status
             for (int j = 0; j < current_logical_level; j++) {
@@ -592,18 +622,43 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 }
             }
             
-            if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
-            // Apply colors based on heading level
-            switch (current_line->level) {
-                case 1: print_formatted_text(current_line->text.c_str(), COLOR_BOLD_BRIGHT_YELLOW, COLOR_RESET); break;
-                case 2: print_formatted_text(current_line->text.c_str(), COLOR_BOLD_BRIGHT_CYAN, COLOR_RESET); break;
-                case 3: print_formatted_text(current_line->text.c_str(), COLOR_GREEN, COLOR_RESET); break;
-                case 4: print_formatted_text(current_line->text.c_str(), COLOR_MAGENTA, COLOR_RESET); break;
-                case 5: print_formatted_text(current_line->text.c_str(), COLOR_BLUE, COLOR_RESET); break;
-                case 6: print_formatted_text(current_line->text.c_str(), COLOR_RED, COLOR_RESET); break;
-                default: print_formatted_text(current_line->text.c_str(), COLOR_RESET, COLOR_RESET); break;
+            if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } 
+            snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); 
+            
+            if (current_line->type == TYPE_HORIZONTAL_RULE) {
+                // Remove trailing space so the horizontal line attaches seamlessly to the tree connector
+                size_t len = strlen(full_prefix);
+                if (len > 0 && full_prefix[len - 1] == ' ') {
+                    full_prefix[len - 1] = '\0';
+                }
+                
+                int prefix_len = TextTable::visible_length(full_prefix);
+                if (config->show_line_numbers) {
+                    prefix_len += max_digits + 2;
+                }
+                int term_width = get_terminal_width();
+                int hr_len = term_width - prefix_len;
+                if (hr_len < 5) hr_len = 5;
+                
+                printf("%s", full_prefix);
+                for (int m = 0; m < hr_len; m++) {
+                    printf("%s", g_ascii_tree ? "-" : "─");
+                }
+                printf("\n");
+            } else {
+                printf("%s", full_prefix);
+                // Apply colors based on heading level
+                switch (effective_level) {
+                    case 1: print_formatted_text(current_line->text.c_str(), COLOR_BOLD_BRIGHT_YELLOW, COLOR_RESET); break;
+                    case 2: print_formatted_text(current_line->text.c_str(), COLOR_BOLD_BRIGHT_CYAN, COLOR_RESET); break;
+                    case 3: print_formatted_text(current_line->text.c_str(), COLOR_GREEN, COLOR_RESET); break;
+                    case 4: print_formatted_text(current_line->text.c_str(), COLOR_MAGENTA, COLOR_RESET); break;
+                    case 5: print_formatted_text(current_line->text.c_str(), COLOR_BLUE, COLOR_RESET); break;
+                    case 6: print_formatted_text(current_line->text.c_str(), COLOR_RED, COLOR_RESET); break;
+                    default: print_formatted_text(current_line->text.c_str(), COLOR_RESET, COLOR_RESET); break;
+                }
+                printf("\n");
             }
-            printf("\n");
 
         } else { // TYPE_UNORDERED_LIST_ITEM, TYPE_ORDERED_LIST_ITEM, TYPE_CONTENT, TYPE_EMPTY
             // Find the closest preceding heading's level
@@ -640,7 +695,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 }
                 if (!is_line_filtered(config, should_print_cache, is_ignored, next_line, k)) {
                     if (next_line->type == TYPE_CONTENT || next_line->type == TYPE_CODE_BLOCK_CONTENT || 
-                        next_line->type == TYPE_BLOCKQUOTE || next_line->type == TYPE_HORIZONTAL_RULE || next_line->type == TYPE_TABLE_CONTENT) {
+                        next_line->type == TYPE_BLOCKQUOTE || next_line->type == TYPE_TABLE_CONTENT) {
                         // Only a normal line, code block, blockquote, or HR causes the vertical line to continue
                         is_last_child = false;
                         break;
@@ -652,22 +707,14 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
             int current_raw_indent_blocks = current_line->level / 4;
             
             if (current_line->type == TYPE_CONTENT || current_line->type == TYPE_CODE_BLOCK_CONTENT ||
-                current_line->type == TYPE_BLOCKQUOTE || current_line->type == TYPE_HORIZONTAL_RULE || current_line->type == TYPE_TABLE_CONTENT) {
+                current_line->type == TYPE_BLOCKQUOTE || current_line->type == TYPE_TABLE_CONTENT) {
                 char base_prefix[MAX_LINE_LENGTH];
                 strcpy(base_prefix, prefix);
 
-                if (current_line->type == TYPE_HORIZONTAL_RULE) {
-                    if (is_last_child) {
-                        strcat(prefix, g_ascii_tree ? "`---" : "└───");
-                    } else {
-                        strcat(prefix, g_ascii_tree ? "|---" : "├───");
-                    }
+                if (is_last_child) {
+                    strcat(prefix, ELBOW_STR);
                 } else {
-                    if (is_last_child) {
-                        strcat(prefix, ELBOW_STR);
-                    } else {
-                        strcat(prefix, TEE_STR);
-                    }
+                    strcat(prefix, TEE_STR);
                 }
                 // Add list item indentation spacing if content is nested inside list
                 for (int j = 0; j < current_raw_indent_blocks; j++) {
@@ -902,8 +949,6 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                             }
                         }
                     }
-                } else if (current_line->type == TYPE_HORIZONTAL_RULE) {
-                    if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s\n", full_prefix, HLINE_STR);
                 } else {
                     char subsequent_prefix[MAX_LINE_LENGTH];
                     strcpy(subsequent_prefix, base_prefix);
@@ -921,10 +966,8 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                     snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix);
                     
                     int prefix_len = TextTable::visible_length(full_prefix);
-                    int sub_prefix_len = TextTable::visible_length(full_sub_prefix);
                     if (config->show_line_numbers) {
                         prefix_len += max_digits + 2;
-                        sub_prefix_len += max_digits + 2;
                     }
                     int term_width = get_terminal_width();
                     
