@@ -905,14 +905,59 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 } else if (current_line->type == TYPE_HORIZONTAL_RULE) {
                     if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s\n", full_prefix, HLINE_STR);
                 } else {
-                    if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix); 
-                    print_formatted_text(current_line->text.c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET);
-                    printf("\n");
+                    char subsequent_prefix[MAX_LINE_LENGTH];
+                    strcpy(subsequent_prefix, base_prefix);
+                    if (is_last_child) {
+                        strcat(subsequent_prefix, INDENT_STR);
+                    } else {
+                        strcat(subsequent_prefix, PIPE_STR);
+                    }
+                    for (int j = 0; j < current_raw_indent_blocks; j++) {
+                        strcat(subsequent_prefix, INDENT_STR);
+                    }
+                    
+                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix);
+                    char full_sub_prefix[MAX_LINE_LENGTH];
+                    snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix);
+                    
+                    int prefix_len = TextTable::visible_length(full_prefix);
+                    int sub_prefix_len = TextTable::visible_length(full_sub_prefix);
+                    if (config->show_line_numbers) {
+                        prefix_len += max_digits + 2;
+                        sub_prefix_len += max_digits + 2;
+                    }
+                    int term_width = get_terminal_width();
+                    
+                    int max_width_first = term_width - prefix_len;
+                    if (max_width_first < 10) max_width_first = 10;
+                    
+                    std::vector<std::string> wrapped_lines = TextTable::wrap_text(current_line->text, max_width_first);
+                    if (wrapped_lines.empty()) wrapped_lines.push_back("");
+                    
+                    int current_cb_line = current_line->original_line_num;
+                    
+                    for (size_t wi = 0; wi < wrapped_lines.size(); wi++) {
+                        if (wi == 0) {
+                            if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET); } 
+                            printf("%s", full_prefix); 
+                            print_formatted_text(wrapped_lines[wi].c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET);
+                            printf("\n");
+                        } else {
+                            // If first line wrapped, subsequent lines need to fit in term_width - sub_prefix_len
+                            // Wait, if it wrapped, we should ideally re-wrap, but wrap_text is done in one pass.
+                            // Since sub_prefix_len is usually the same length as prefix_len, it's fine.
+                            if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET); } 
+                            printf("%s", full_sub_prefix); 
+                            print_formatted_text(wrapped_lines[wi].c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET);
+                            printf("\n");
+                        }
+                    }
                 }
             } else if (current_line->type == TYPE_UNORDERED_LIST_ITEM || 
                        current_line->type == TYPE_TASK_LIST_ITEM_UNCHECKED || 
-                       current_line->type == TYPE_TASK_LIST_ITEM_CHECKED) {
-                // List items have no tree connectors, but need the vertical line if not the last child
+                       current_line->type == TYPE_TASK_LIST_ITEM_CHECKED ||
+                       current_line->type == TYPE_ORDERED_LIST_ITEM) {
+                
                 if (is_last_child) {
                     strcat(prefix, INDENT_STR);
                 } else {
@@ -922,29 +967,54 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                     strcat(prefix, INDENT_STR);
                 }
                 
+                char item_marker[64] = "";
+                char item_marker_sub[64] = "";
                 if (current_line->type == TYPE_TASK_LIST_ITEM_CHECKED) {
-                    char full_item_prefix[MAX_LINE_LENGTH]; snprintf(full_item_prefix, sizeof(full_item_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } printf("%s%s[%s✓%s%s] ", full_item_prefix, COLOR_DIM, COLOR_BRIGHT_GREEN, COLOR_RESET, COLOR_DIM);
-                    print_formatted_text(current_line->text.c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET); 
+                    snprintf(item_marker, sizeof(item_marker), "%s[%s✓%s%s] %s", COLOR_DIM, COLOR_BRIGHT_GREEN, COLOR_RESET, COLOR_DIM, COLOR_RESET);
+                    snprintf(item_marker_sub, sizeof(item_marker_sub), "    ");
                 } else if (current_line->type == TYPE_TASK_LIST_ITEM_UNCHECKED) {
-                    char full_item_prefix[MAX_LINE_LENGTH]; snprintf(full_item_prefix, sizeof(full_item_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } printf("%s%s[ ] %s", full_item_prefix, COLOR_DIM, COLOR_RESET);
-                    print_formatted_text(current_line->text.c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET); 
+                    snprintf(item_marker, sizeof(item_marker), "%s[ ] %s", COLOR_DIM, COLOR_RESET);
+                    snprintf(item_marker_sub, sizeof(item_marker_sub), "    ");
+                } else if (current_line->type == TYPE_ORDERED_LIST_ITEM) {
+                    snprintf(item_marker, sizeof(item_marker), "%s%d.%s ", COLOR_BRIGHT_BLUE, current_line->list_number, COLOR_RESET);
+                    int marker_len = snprintf(NULL, 0, "%d. ", current_line->list_number);
+                    for (int m = 0; m < marker_len && m < 63; m++) item_marker_sub[m] = ' ';
+                    item_marker_sub[marker_len] = '\0';
                 } else {
-                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } printf("%s%s", full_prefix, BULLET_POINT); 
-                    print_formatted_text(current_line->text.c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET); 
+                    snprintf(item_marker, sizeof(item_marker), "%s", BULLET_POINT);
+                    int marker_len = TextTable::visible_length(BULLET_POINT);
+                    for (int m = 0; m < marker_len && m < 63; m++) item_marker_sub[m] = ' ';
+                    item_marker_sub[marker_len] = '\0';
                 }
-                printf("\n");
-            } else if (current_line->type == TYPE_ORDERED_LIST_ITEM) {
-                if (is_last_child) {
-                    strcat(prefix, INDENT_STR);
-                } else {
-                    strcat(prefix, PIPE_STR);
+                
+                snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); 
+                
+                int prefix_len = TextTable::visible_length(full_prefix) + TextTable::visible_length(item_marker);
+                if (config->show_line_numbers) {
+                    prefix_len += max_digits + 2;
                 }
-                for (int j = 0; j < current_raw_indent_blocks; j++) {
-                    strcat(prefix, INDENT_STR);
+                int term_width = get_terminal_width();
+                int max_width = term_width - prefix_len;
+                if (max_width < 10) max_width = 10;
+                
+                std::vector<std::string> wrapped_lines = TextTable::wrap_text(current_line->text, max_width);
+                if (wrapped_lines.empty()) wrapped_lines.push_back("");
+                
+                int current_cb_line = current_line->original_line_num;
+                
+                for (size_t wi = 0; wi < wrapped_lines.size(); wi++) {
+                    if (wi == 0) {
+                        if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET); } 
+                        printf("%s%s", full_prefix, item_marker); 
+                        print_formatted_text(wrapped_lines[wi].c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET);
+                        printf("\n");
+                    } else {
+                        if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET); } 
+                        printf("%s%s", full_prefix, item_marker_sub); 
+                        print_formatted_text(wrapped_lines[wi].c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET);
+                        printf("\n");
+                    }
                 }
-                snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } printf("%s%s%d.%s ", full_prefix, COLOR_BRIGHT_BLUE, current_line->list_number, COLOR_RESET); 
-                print_formatted_text(current_line->text.c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET); 
-                printf("\n");
             }
             
         }
