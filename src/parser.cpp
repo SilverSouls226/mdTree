@@ -1,4 +1,5 @@
 #include "parser.h"
+#include "TextTable.h"
 #include "utils.h"
 #include <ctype.h>
 #include <regex.h>
@@ -176,7 +177,6 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
         if (in_code_block) {
             ParsedLine *last_line = &lines_data[((int)lines_data.size() - 1)];
             int old_len = last_line->text.length();
-            int new_len = old_len + strlen(line_buffer) + 2; // +1 for \n, +1 for \0
             if (old_len > 0) last_line->text += "\n";
             last_line->text += line_buffer;
             continue;
@@ -280,8 +280,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
             if (prev_line_idx != -1 && lines_data[prev_line_idx].type == TYPE_BLOCKQUOTE) {
                 ParsedLine *last_line = &lines_data[prev_line_idx];
                 int old_len = last_line->text.length();
-                int new_len = old_len + strlen(trimmed_line) + 2;
-                last_line->text += "\n";
+                if (old_len > 0) last_line->text += "\n";
                 last_line->text += trimmed_line;
             } else {
                 add_parsed_line(TYPE_BLOCKQUOTE, raw_current_indent, trimmed_line, 0, current_line_num);
@@ -331,9 +330,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
         if (len > 0 && trimmed_line[0] == '|') {
             if (prev_line_idx != -1 && lines_data[prev_line_idx].type == TYPE_TABLE_CONTENT) {
                 ParsedLine *last_line = &lines_data[prev_line_idx];
-                int old_len = last_line->text.length();
-                int new_len = old_len + strlen(line_buffer) + 2;
-                if (old_len > 0) last_line->text += "\n";
+                if (last_line->text.length() > 0) last_line->text += "\n";
                 last_line->text += line_buffer;
             } else {
                 add_parsed_line(TYPE_TABLE_CONTENT, raw_current_indent, line_buffer, 0, current_line_num);
@@ -595,7 +592,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 }
             }
             
-            if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
+            if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
             // Apply colors based on heading level
             switch (current_line->level) {
                 case 1: print_formatted_text(current_line->text.c_str(), COLOR_BOLD_BRIGHT_YELLOW, COLOR_RESET); break;
@@ -689,7 +686,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                         strcat(subsequent_prefix, INDENT_STR);
                     }
 
-                    if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
+                    if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
                     std::string code_text_copy = current_line->text; char *code_text = &code_text_copy[0];
                     char *newline_pos;
                     bool first_line = true;
@@ -705,7 +702,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                                 printf("%s%s%s\n", COLOR_CYAN, code_text, COLOR_RESET);
                                 first_line = false;
                             } else {
-                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET, VLINE_STR); } printf("%s%s%s%s\n", full_sub_prefix, COLOR_CYAN, code_text, COLOR_RESET);
+                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET); } printf("%s%s%s%s\n", full_sub_prefix, COLOR_CYAN, code_text, COLOR_RESET);
                             }
                             *newline_pos = '\n';
                             code_text = newline_pos + 1;
@@ -715,11 +712,11 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                                 current_cb_line++;
                                 printf("%s%s%s\n", COLOR_CYAN, code_text, COLOR_RESET);
                             } else if (*code_text != '\0') {
-                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET, VLINE_STR); } printf("%s%s%s%s\n", full_sub_prefix, COLOR_CYAN, code_text, COLOR_RESET);
+                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET); } printf("%s%s%s%s\n", full_sub_prefix, COLOR_CYAN, code_text, COLOR_RESET);
                             }
                         }
                     }
-                } else if (current_line->type == TYPE_TABLE_CONTENT || current_line->type == TYPE_BLOCKQUOTE) {
+                } else if (current_line->type == TYPE_TABLE_CONTENT) {
                     char subsequent_prefix[MAX_LINE_LENGTH];
                     strcpy(subsequent_prefix, base_prefix);
                     if (is_last_child) {
@@ -731,7 +728,98 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                         strcat(subsequent_prefix, INDENT_STR);
                     }
 
-                    if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
+                    TextTable t;
+                    std::string code_text = current_line->text;
+                    size_t pos = 0;
+                    while (pos < code_text.size()) {
+                        size_t end = code_text.find('\n', pos);
+                        if (end == std::string::npos) end = code_text.size();
+                        std::string line = code_text.substr(pos, end - pos);
+                        pos = end + 1;
+                        
+                        bool is_divider = true;
+                        for (char c : line) {
+                            if (c != '|' && c != '-' && c != ':' && c != ' ' && c != '\r') {
+                                is_divider = false;
+                                break;
+                            }
+                        }
+                        if (is_divider) continue;
+                        
+                        size_t col_pos = 0;
+                        if (line.size() > 0 && line[0] == '|') col_pos = 1;
+                        while (col_pos < line.size()) {
+                            size_t col_end = line.find('|', col_pos);
+                            if (col_end == std::string::npos) col_end = line.size();
+                            std::string cell = line.substr(col_pos, col_end - col_pos);
+                            size_t start = cell.find_first_not_of(" \r\n");
+                            if (start != std::string::npos) {
+                                size_t end_cell = cell.find_last_not_of(" \r\n");
+                                cell = cell.substr(start, end_cell - start + 1);
+                            } else {
+                                cell = "";
+                            }
+                            // Avoid adding an empty column if it's trailing due to the last '|'
+                            if (!(col_end == line.size() && cell == "")) {
+                                t.add(cell);
+                            }
+                            col_pos = col_end + 1;
+                        }
+                        t.endOfRow();
+                    }
+                    
+                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, subsequent_prefix);
+                    int prefix_len = TextTable::visible_length(full_prefix);
+                    if (config->show_line_numbers) prefix_len += max_digits + 2;
+                    int term_width = get_terminal_width();
+                    int max_total_width = term_width - prefix_len;
+                    if (max_total_width < 10) max_total_width = 10; // Sanity check
+
+                    std::string table_str = t.str(max_total_width);
+                    bool first_line = true;
+                    int current_cb_line = current_line->original_line_num;
+                    size_t t_pos = 0;
+                    
+                    if (table_str.empty()) {
+                        printf("\n");
+                    } else {
+                        while (t_pos < table_str.size()) {
+                            size_t end = table_str.find('\n', t_pos);
+                            if (end == std::string::npos) end = table_str.size();
+                            std::string line = table_str.substr(t_pos, end - t_pos);
+                            t_pos = end + 1;
+                            if (line.empty() && t_pos >= table_str.size()) break;
+                            
+                            if (first_line) {
+                                if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET); } 
+                                snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, subsequent_prefix); 
+                                printf("%s", full_prefix);
+                                print_formatted_text(line.c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET);
+                                printf("\n");
+                                first_line = false;
+                            } else {
+                                char full_sub_prefix[MAX_LINE_LENGTH]; 
+                                snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); 
+                                if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET); } 
+                                printf("%s", full_sub_prefix);
+                                print_formatted_text(line.c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET);
+                                printf("\n");
+                            }
+                        }
+                    }
+                } else if (current_line->type == TYPE_BLOCKQUOTE) {
+                    char subsequent_prefix[MAX_LINE_LENGTH];
+                    strcpy(subsequent_prefix, base_prefix);
+                    if (is_last_child) {
+                        strcat(subsequent_prefix, INDENT_STR);
+                    } else {
+                        strcat(subsequent_prefix, PIPE_STR);
+                    }
+                    for (int j = 0; j < current_raw_indent_blocks; j++) {
+                        strcat(subsequent_prefix, INDENT_STR);
+                    }
+
+                    if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
                     std::string code_text_copy = current_line->text; char *code_text = &code_text_copy[0];
                     char *newline_pos;
                     bool first_line = true;
@@ -767,7 +855,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                                 printf("\n");
                                 first_line = false;
                             } else {
-                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET, VLINE_STR); } printf("%s", full_sub_prefix);
+                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET); } printf("%s", full_sub_prefix);
                                 if (current_line->type == TYPE_BLOCKQUOTE) {
                                     for (int i = 0; i < bq_level - 1; i++) printf("%s", INDENT_STR);
                                     printf("%s>%s ", COLOR_DIM, COLOR_RESET);
@@ -802,7 +890,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                                 }
                                 printf("\n");
                             } else if (*code_text != '\0') {
-                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET, VLINE_STR); } printf("%s", full_sub_prefix);
+                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET); } printf("%s", full_sub_prefix);
                                 if (current_line->type == TYPE_BLOCKQUOTE) {
                                     for (int i = 0; i < bq_level - 1; i++) printf("%s", INDENT_STR);
                                     printf("%s>%s ", COLOR_DIM, COLOR_RESET);
@@ -815,9 +903,9 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                         }
                     }
                 } else if (current_line->type == TYPE_HORIZONTAL_RULE) {
-                    if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s\n", full_prefix, HLINE_STR);
+                    if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s%s\n", full_prefix, HLINE_STR);
                 } else {
-                    if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix); 
+                    if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix); 
                     print_formatted_text(current_line->text.c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET);
                     printf("\n");
                 }
@@ -835,13 +923,13 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 }
                 
                 if (current_line->type == TYPE_TASK_LIST_ITEM_CHECKED) {
-                    char full_item_prefix[MAX_LINE_LENGTH]; snprintf(full_item_prefix, sizeof(full_item_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } printf("%s%s[%s✓%s%s] ", full_item_prefix, COLOR_DIM, COLOR_BRIGHT_GREEN, COLOR_RESET, COLOR_DIM);
+                    char full_item_prefix[MAX_LINE_LENGTH]; snprintf(full_item_prefix, sizeof(full_item_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } printf("%s%s[%s✓%s%s] ", full_item_prefix, COLOR_DIM, COLOR_BRIGHT_GREEN, COLOR_RESET, COLOR_DIM);
                     print_formatted_text(current_line->text.c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET); 
                 } else if (current_line->type == TYPE_TASK_LIST_ITEM_UNCHECKED) {
-                    char full_item_prefix[MAX_LINE_LENGTH]; snprintf(full_item_prefix, sizeof(full_item_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } printf("%s%s[ ] %s", full_item_prefix, COLOR_DIM, COLOR_RESET);
+                    char full_item_prefix[MAX_LINE_LENGTH]; snprintf(full_item_prefix, sizeof(full_item_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } printf("%s%s[ ] %s", full_item_prefix, COLOR_DIM, COLOR_RESET);
                     print_formatted_text(current_line->text.c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET); 
                 } else {
-                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } printf("%s%s", full_prefix, BULLET_POINT); 
+                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } printf("%s%s", full_prefix, BULLET_POINT); 
                     print_formatted_text(current_line->text.c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET); 
                 }
                 printf("\n");
@@ -854,7 +942,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 for (int j = 0; j < current_raw_indent_blocks; j++) {
                     strcat(prefix, INDENT_STR);
                 }
-                snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, VLINE_STR); } printf("%s%s%d.%s ", full_prefix, COLOR_BRIGHT_BLUE, current_line->list_number, COLOR_RESET); 
+                snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); if (config->show_line_numbers) { printf("%s%*d%s  ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET); } printf("%s%s%d.%s ", full_prefix, COLOR_BRIGHT_BLUE, current_line->list_number, COLOR_RESET); 
                 print_formatted_text(current_line->text.c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET); 
                 printf("\n");
             }

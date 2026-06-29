@@ -2,6 +2,8 @@
 #include "types.h"
 #include "utils.h"
 #include <ctype.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 bool g_no_color = false;
 bool g_ascii_tree = false;
@@ -254,4 +256,12 @@ int count_words(const char *text) {
         text++;
     }
     return count;
+}
+
+int get_terminal_width() {
+    struct winsize w;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == -1) {
+        return 80; // Default width
+    }
+    return w.ws_col;
 }
