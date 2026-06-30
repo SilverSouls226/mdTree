@@ -773,7 +773,7 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 if (next_line->type == TYPE_HEADING && next_line->level <= parent_heading_level) {
                     break; // Reached end of parent scope
                 }
-                if (next_line->type == TYPE_HORIZONTAL_RULE && get_horizontal_rule_level(k) <= parent_heading_level) {
+                if (config->show_hr && next_line->type == TYPE_HORIZONTAL_RULE && get_horizontal_rule_level(k) <= parent_heading_level) {
                     break; // Reached end of parent scope via HR
                 }
                 if (!is_line_filtered(config, should_print_cache, is_ignored, next_line, k)) {

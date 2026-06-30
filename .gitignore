@@ -2,9 +2,11 @@ mdtree
 GEMINI.md
 *.patch
 *.md
+!README.md
 photos
 test*
 *.txt
 *.py
 *.o
 test-all-features.md
+.obsidian/
