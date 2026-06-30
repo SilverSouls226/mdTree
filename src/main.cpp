@@ -5,6 +5,9 @@
 #include <getopt.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <string>
 
 #include "types.h"
 #include "utils.h"
@@ -73,7 +76,7 @@ void process_directory(const char *dirpath, const char *global_prefix, Config *c
 }
 int main(int argc, char *argv[]) {
 
-    Config config = { MAX_AWK_LEVEL, false, false, "", false, false, false, false, false, false, "", false };
+    Config config = { MAX_AWK_LEVEL, false, false, "", false, false, false, false, false, false, "", false, "", false };
     int opt;
     int option_index = 0;
     static struct option long_options[] = {
@@ -91,10 +94,12 @@ int main(int argc, char *argv[]) {
         {"ignore", required_argument, 0, 'I' },
         {"headings-only", no_argument, 0, 'H' },
         {"show-hr", no_argument, 0, 'R' },
+        {"focus", required_argument, 0, 'F' },
+        {"no-pager", no_argument, 0, 'P' },
         {0,      0,           0,   0  }
     };
 
-    while ((opt = getopt_long(argc, argv, "d:hnwvf:ir:casI:HR", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "d:hnwvf:ir:casI:HRF:P", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'd':
                 config.max_level_filter = atoi(optarg);
@@ -142,6 +147,12 @@ int main(int argc, char *argv[]) {
             case 'R':
                 config.show_hr = true;
                 break;
+            case 'F':
+                config.focus_query = optarg;
+                break;
+            case 'P':
+                config.no_pager = true;
+                break;
             case 'h':
                 display_help();
                 return EXIT_SUCCESS;
@@ -176,6 +187,21 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
     
+    bool use_pager = false;
+    FILE *temp_out = NULL;
+    int original_stdout_fd = -1;
+
+    if (isatty(STDOUT_FILENO) && !config.no_pager) {
+        use_pager = true;
+        temp_out = tmpfile();
+        if (temp_out != NULL) {
+            original_stdout_fd = dup(STDOUT_FILENO);
+            dup2(fileno(temp_out), STDOUT_FILENO);
+        } else {
+            use_pager = false;
+        }
+    }
+
     if (S_ISDIR(st.st_mode)) {
         printf("%s\n", target_path);
         process_directory(target_path, "", &config);
@@ -202,5 +228,47 @@ int main(int argc, char *argv[]) {
         printf("Links:             %d\n", g_stats.links);
         printf("Images:            %d\n", g_stats.images);
     }
+
+    if (use_pager && temp_out != NULL) {
+        fflush(stdout);
+        dup2(original_stdout_fd, STDOUT_FILENO);
+        close(original_stdout_fd);
+
+        rewind(temp_out);
+
+        std::string output_content;
+        char buf[4096];
+        int line_count = 0;
+        while (fgets(buf, sizeof(buf), temp_out) != NULL) {
+            output_content += buf;
+        }
+
+        for (size_t i = 0; i < output_content.length(); i++) {
+            if (output_content[i] == '\n') {
+                line_count++;
+            }
+        }
+
+        int term_height = 24;
+        struct winsize w;
+        if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0) {
+            term_height = w.ws_row;
+        }
+
+        if (line_count > term_height) {
+            FILE *pager = popen("less -R", "w");
+            if (pager != NULL) {
+                fwrite(output_content.c_str(), 1, output_content.length(), pager);
+                pclose(pager);
+            } else {
+                fwrite(output_content.c_str(), 1, output_content.length(), stdout);
+            }
+        } else {
+            fwrite(output_content.c_str(), 1, output_content.length(), stdout);
+        }
+
+        fclose(temp_out);
+    }
+
     return EXIT_SUCCESS;
 }

@@ -30,6 +30,8 @@ void display_help() {
     printf("  -r, --regex <regex>    Search the file using a regular expression.\n");
     printf("  -I, --ignore <regex>   Ignore headings (and their children) matching the regex.\n");
     printf("  -H, --headings-only    Strictly show only headings (like a Table of Contents).\n");
+    printf("  -F, --focus <regex>    Focus on the first heading matching the regex and only show its subtree.\n");
+    printf("  -P, --no-pager         Disable automatic less paging.\n");
     printf("  -c, --no-color         Disable colored output.\n");
     printf("  -a, --ascii            Use ASCII characters for tree branches instead of box-drawing characters.\n");
     printf("  -s, --stats            Print statistics about parsed files at the end.\n");
@@ -40,6 +42,7 @@ void display_help() {
     printf("\n");
     printf("Examples:\n");
     printf("  mdtree my_document.md\n");
+    printf("  mdtree -F \"API Endpoints\" my_document.md\n");
     printf("  mdtree -d 3 another_doc.md\n");
     printf("  mdtree -n -d 7 .\n");
 }
@@ -260,8 +263,11 @@ int count_words(const char *text) {
 
 int get_terminal_width() {
     struct winsize w;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == -1) {
-        return 80; // Default width
+    if (ioctl(STDERR_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0) {
+        return w.ws_col;
     }
-    return w.ws_col;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0) {
+        return w.ws_col;
+    }
+    return 80; // Default width
 }

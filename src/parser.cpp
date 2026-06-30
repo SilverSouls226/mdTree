@@ -422,10 +422,66 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
         add_warning(current_line_num, "File contains no headings");
     }
 
-
     // --- Second Pass: Print formatted output ---
     
     bool *is_ignored = (bool*)calloc(((int)lines_data.size()), sizeof(bool));
+
+    // --- Focus Mode filtering ---
+    if (!config->focus_query.empty()) {
+        // First, mark everything as ignored
+        for (int i = 0; i < (int)lines_data.size(); i++) {
+            is_ignored[i] = true;
+        }
+
+        regex_t focus_regex;
+        int cflags = REG_EXTENDED;
+        if (config->case_insensitive_search) cflags |= REG_ICASE;
+        if (regcomp(&focus_regex, config->focus_query.c_str(), cflags) != 0) {
+            fprintf(stderr, "Error: Failed to compile focus regex '%s'\n", config->focus_query.c_str());
+            free(is_ignored);
+            cleanup();
+            return false;
+        }
+
+        bool match_found = false;
+        for (int i = 0; i < (int)lines_data.size(); i++) {
+            if (lines_data[i].type == TYPE_HEADING) {
+                if (regexec(&focus_regex, lines_data[i].text.c_str(), 0, NULL, 0) == 0) {
+                    match_found = true;
+                    int focus_level = lines_data[i].level;
+                    int focus_end_idx = (int)lines_data.size();
+                    for (int k = i + 1; k < (int)lines_data.size(); k++) {
+                        if (lines_data[k].type == TYPE_HEADING && lines_data[k].level <= focus_level) {
+                            focus_end_idx = k;
+                            break;
+                        }
+                    }
+                    for (int j = i; j < focus_end_idx; j++) {
+                        is_ignored[j] = false;
+                    }
+                    // Trace back to un-ignore all parent headings
+                    int curr_level = focus_level;
+                    for (int k = i - 1; k >= 0; k--) {
+                        if (lines_data[k].type == TYPE_HEADING && lines_data[k].level < curr_level) {
+                            is_ignored[k] = false;
+                            curr_level = lines_data[k].level;
+                        }
+                    }
+                }
+            }
+        }
+
+        regfree(&focus_regex);
+
+        if (!match_found) {
+            if (global_prefix == NULL || strcmp(global_prefix, "") == 0) {
+                fprintf(stderr, "Error: Focus heading matching '%s' not found.\n", config->focus_query.c_str());
+            }
+            free(is_ignored);
+            cleanup();
+            return false;
+        }
+    }
     if (!config->ignore_query.empty()) {
         regex_t ignore_regex;
         bool ignore_regex_compiled = false;
@@ -716,8 +772,8 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 }
                 if (!is_line_filtered(config, should_print_cache, is_ignored, next_line, k)) {
                     if (next_line->type == TYPE_CONTENT || next_line->type == TYPE_CODE_BLOCK_CONTENT || 
-                        next_line->type == TYPE_BLOCKQUOTE || next_line->type == TYPE_TABLE_CONTENT) {
-                        // Only a normal line, code block, blockquote, or HR causes the vertical line to continue
+                        next_line->type == TYPE_BLOCKQUOTE || next_line->type == TYPE_TABLE_CONTENT ||
+                        (next_line->type == TYPE_HEADING && next_line->level > parent_heading_level)) {
                         is_last_child = false;
                         break;
                     }

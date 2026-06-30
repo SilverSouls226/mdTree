@@ -115,6 +115,8 @@ struct Config {
     bool headings_only = false;
     std::string ignore_query = "";
     bool show_hr = false;
+    std::string focus_query = "";
+    bool no_pager = false;
 };
 
 #endif
