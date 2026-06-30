@@ -203,6 +203,35 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
     while (fgets(line_buffer, sizeof(line_buffer), fp) != NULL) {
         current_line_num++;
 
+        if (config->show_stats) {
+            int original_len = strlen(line_buffer);
+            g_stats.characters += original_len;
+            
+            bool is_empty_for_stats = true;
+            for (int i = 0; i < original_len; i++) {
+                if (!isspace((unsigned char)line_buffer[i])) {
+                    is_empty_for_stats = false;
+                    break;
+                }
+            }
+            if (is_empty_for_stats) {
+                g_stats.empty_lines++;
+            } else {
+                g_stats.non_empty_lines++;
+                g_stats.words += count_words(line_buffer);
+            }
+            
+            const char *p = line_buffer;
+            while ((p = strchr(p, '[')) != NULL) {
+                if (p > line_buffer && *(p - 1) == '!') {
+                    g_stats.images++;
+                } else {
+                    g_stats.links++;
+                }
+                p++;
+            }
+        }
+
         // Trailing whitespace warning
         int original_len = strlen(line_buffer);
         // fgets includes the newline character, so the last char is \n (unless it's the last line without one).
@@ -617,46 +646,23 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
         int current_logical_level = 0; // Represents the indentation level we are currently at (0-based)
         bool is_last_sibling_in_current_scope = true;
 
-        // Filtering logic
-        if (is_line_filtered(config, should_print_cache, is_ignored, current_line, i)) continue;
-
         if (config->show_stats) {
-            int line_len = current_line->text.length();
-            g_stats.characters += line_len;
-            if (line_len == 0 || current_line->type == TYPE_EMPTY) {
-                g_stats.empty_lines++;
-            } else {
-                g_stats.non_empty_lines++;
-            }
-
             if (current_line->type == TYPE_HEADING) {
                 g_stats.headings++;
-                g_stats.words += count_words(current_line->text.c_str());
-            } else if (current_line->type == TYPE_CONTENT || current_line->type == TYPE_BLOCKQUOTE || current_line->type == TYPE_CODE_BLOCK_CONTENT || current_line->type == TYPE_TABLE_CONTENT) {
-                g_stats.words += count_words(current_line->text.c_str());
-                if (current_line->type == TYPE_BLOCKQUOTE) g_stats.blockquotes++;
-                if (current_line->type == TYPE_CODE_BLOCK_CONTENT) g_stats.code_blocks++;
-                if (current_line->type == TYPE_TABLE_CONTENT) g_stats.tables++;
+            } else if (current_line->type == TYPE_BLOCKQUOTE) {
+                g_stats.blockquotes++;
+            } else if (current_line->type == TYPE_CODE_BLOCK_CONTENT) {
+                g_stats.code_blocks++;
+            } else if (current_line->type == TYPE_TABLE_CONTENT) {
+                g_stats.tables++;
             } else if (current_line->type == TYPE_UNORDERED_LIST_ITEM || current_line->type == TYPE_ORDERED_LIST_ITEM || current_line->type == TYPE_TASK_LIST_ITEM_CHECKED || current_line->type == TYPE_TASK_LIST_ITEM_UNCHECKED) {
                 g_stats.lists++;
-                g_stats.words += count_words(current_line->text.c_str());
                 if (current_line->type == TYPE_TASK_LIST_ITEM_CHECKED) g_stats.completed_tasks++;
                 if (current_line->type == TYPE_TASK_LIST_ITEM_UNCHECKED) g_stats.incomplete_tasks++;
             }
-
-            const char *p = current_line->text.c_str();
-            while ((p = strchr(p, '[')) != NULL) {
-                if (p > current_line->text.c_str() && *(p - 1) == '!') {
-                    g_stats.images++;
-                } else {
-                    const char *close_bracket = strchr(p, ']');
-                    if (close_bracket && *(close_bracket + 1) == '(') {
-                        g_stats.links++;
-                    }
-                }
-                p++;
-            }
         }
+
+        if (is_line_filtered(config, should_print_cache, is_ignored, current_line, i)) continue;
 
         if (current_line->type == TYPE_HEADING || current_line->type == TYPE_HORIZONTAL_RULE) {
             int effective_level = (current_line->type == TYPE_HEADING) ? current_line->level : get_horizontal_rule_level(i);
