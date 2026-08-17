@@ -380,12 +380,14 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
             LineType item_type = TYPE_UNORDERED_LIST_ITEM;
 
             if (strlen(list_content) >= 4 && list_content[0] == '[' && list_content[2] == ']' && list_content[3] == ' ') {
-                if (list_content[1] == ' ') {
+                char mark = list_content[1];
+                if (mark == ' ') {
                     item_type = TYPE_TASK_LIST_ITEM_UNCHECKED;
-                } else {
+                    list_content += 4;
+                } else if (mark == 'x' || mark == 'X') {
                     item_type = TYPE_TASK_LIST_ITEM_CHECKED;
+                    list_content += 4;
                 }
-                list_content += 4;
             }
 
             add_parsed_line(item_type, raw_current_indent, list_content, 0, current_line_num); // Store raw indent
@@ -905,36 +907,28 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                     int max_total_width = term_width - prefix_len;
                     if (max_total_width < 10) max_total_width = 10; // Sanity check
 
-                    std::string table_str = t.str(max_total_width);
-                    bool first_line = true;
+                    auto table_lines = t.get_lines(max_total_width);
                     int current_cb_line = current_line->original_line_num;
-                    size_t t_pos = 0;
                     
-                    if (table_str.empty()) {
+                    if (table_lines.empty()) {
                         printf("\n");
                     } else {
-                        while (t_pos < table_str.size()) {
-                            size_t end = table_str.find('\n', t_pos);
-                            if (end == std::string::npos) end = table_str.size();
-                            std::string line = table_str.substr(t_pos, end - t_pos);
-                            t_pos = end + 1;
-                            if (line.empty() && t_pos >= table_str.size()) break;
+                        for (size_t i = 0; i < table_lines.size(); i++) {
+                            const std::string& line = table_lines[i].first;
+                            bool is_new_md_line = table_lines[i].second;
                             
-                            if (first_line) {
+                            char full_sub_prefix[MAX_LINE_LENGTH]; 
+                            snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); 
+                            
+                            if (is_new_md_line) {
                                 if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET, "|"); } 
-                                snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, subsequent_prefix); 
-                                printf("%s", full_prefix);
-                                print_formatted_text(line.c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET);
-                                printf("\n");
-                                first_line = false;
                             } else {
-                                char full_sub_prefix[MAX_LINE_LENGTH]; 
-                                snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); 
-                                if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET, "|"); } 
-                                printf("%s", full_sub_prefix);
-                                print_formatted_text(line.c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET);
-                                printf("\n");
+                                if (config->show_line_numbers) { printf("%*s %s ", max_digits, "", "|"); } 
                             }
+                            
+                            printf("%s", full_sub_prefix);
+                            print_formatted_text(line.c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET);
+                            printf("\n");
                         }
                     }
                 } else if (current_line->type == TYPE_BLOCKQUOTE) {
@@ -1115,16 +1109,17 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                 
                 int current_cb_line = current_line->original_line_num;
                 
+                const char* text_color = (current_line->type == TYPE_TASK_LIST_ITEM_CHECKED) ? COLOR_DIM : COLOR_BRIGHT_WHITE;
                 for (size_t wi = 0; wi < wrapped_lines.size(); wi++) {
                     if (wi == 0) {
-                        if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET, "|"); } 
+                        if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_cb_line, COLOR_RESET, "|"); } 
                         printf("%s%s", full_prefix, item_marker); 
-                        print_formatted_text(wrapped_lines[wi].c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET);
+                        print_formatted_text(wrapped_lines[wi].c_str(), text_color, COLOR_RESET);
                         printf("\n");
                     } else {
                         if (config->show_line_numbers) { printf("%*s %s ", max_digits, "", "|"); } 
                         printf("%s%s", full_prefix, item_marker_sub); 
-                        print_formatted_text(wrapped_lines[wi].c_str(), COLOR_BRIGHT_WHITE, COLOR_RESET);
+                        print_formatted_text(wrapped_lines[wi].c_str(), text_color, COLOR_RESET);
                         printf("\n");
                     }
                 }
