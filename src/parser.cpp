@@ -1161,7 +1161,18 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
     }
 
     if (!config->suppress_warnings && has_any_warnings) {
-        printf("\n%s%s Linter Warnings %s%s\n", COLOR_BRIGHT_YELLOW, HLINE_STR, HLINE_STR, COLOR_RESET); //, COLOR_BRIGHT_YELLOW, COLOR_RESET);
+        int term_width = get_terminal_width();
+        int heading_len = 17; // " Linter Warnings "
+        int left_dashes = (term_width - heading_len) / 2;
+        if (left_dashes < 2) left_dashes = 2;
+        int right_dashes = term_width - heading_len - left_dashes;
+        if (right_dashes < 2) right_dashes = 2;
+        
+        printf("\n%s", COLOR_BRIGHT_YELLOW);
+        for (int m = 0; m < left_dashes; m++) printf("%s", HLINE_STR);
+        printf(" Linter Warnings ");
+        for (int m = 0; m < right_dashes; m++) printf("%s", HLINE_STR);
+        printf("%s\n", COLOR_RESET);
         for (size_t j = 0; j < warnings.size(); j++) {
             printf("%sLine %d: %s%s\n", COLOR_YELLOW, warnings[j].line_number, warnings[j].message.c_str(), COLOR_RESET);
         }
