@@ -818,33 +818,55 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                         strcat(subsequent_prefix, INDENT_STR);
                     }
 
-                    if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_line->original_line_num, COLOR_RESET, "|"); } snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix); printf("%s", full_prefix);
-                    std::string code_text_copy = current_line->text; char *code_text = &code_text_copy[0];
-                    char *newline_pos;
-                    bool first_line = true;
+                    snprintf(full_prefix, sizeof(full_prefix), "%s%s", global_prefix, prefix);
+                    char full_sub_prefix[MAX_LINE_LENGTH]; 
+                    snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix);
+                    
+                    int prefix_len = TextTable::visible_length(full_prefix);
+                    if (config->show_line_numbers) prefix_len += max_digits + 3;
+                    int term_width = get_terminal_width();
+                    int max_width = term_width - prefix_len;
+                    if (max_width < 10) max_width = 10;
+                    
+                    std::string code_text = current_line->text;
                     int current_cb_line = current_line->original_line_num;
                     
-                    if (code_text[0] == '\0') {
-                        printf("%s%s\n", COLOR_CYAN, COLOR_RESET);
+                    if (code_text.empty()) {
+                        if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_cb_line, COLOR_RESET, "|"); } 
+                        printf("%s%s%s\n", full_prefix, COLOR_CYAN, COLOR_RESET);
                     } else {
-                        while ((newline_pos = strchr(code_text, '\n')) != NULL) {
-                            *newline_pos = '\0';
-                            if (first_line) {
-                                current_cb_line++;
-                                printf("%s%s%s\n", COLOR_CYAN, code_text, COLOR_RESET);
-                                first_line = false;
-                            } else {
-                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET, "|"); } printf("%s%s%s%s\n", full_sub_prefix, COLOR_CYAN, code_text, COLOR_RESET);
+                        size_t pos = 0;
+                        bool first_line = true;
+                        while (pos < code_text.size()) {
+                            size_t end = code_text.find('\n', pos);
+                            if (end == std::string::npos) end = code_text.size();
+                            std::string line = code_text.substr(pos, end - pos);
+                            pos = end + 1;
+                            
+                            std::vector<std::string> wrapped_lines;
+                            std::string remaining = line;
+                            while (remaining.length() > (size_t)max_width) {
+                                wrapped_lines.push_back(remaining.substr(0, max_width));
+                                remaining = remaining.substr(max_width);
                             }
-                            *newline_pos = '\n';
-                            code_text = newline_pos + 1;
-                        }
-                        if (*code_text != '\0' || !first_line) {
-                            if (first_line) {
-                                current_cb_line++;
-                                printf("%s%s%s\n", COLOR_CYAN, code_text, COLOR_RESET);
-                            } else if (*code_text != '\0') {
-                                char full_sub_prefix[MAX_LINE_LENGTH]; snprintf(full_sub_prefix, sizeof(full_sub_prefix), "%s%s", global_prefix, subsequent_prefix); if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_cb_line++, COLOR_RESET, "|"); } printf("%s%s%s%s\n", full_sub_prefix, COLOR_CYAN, code_text, COLOR_RESET);
+                            if (!remaining.empty() || wrapped_lines.empty()) {
+                                wrapped_lines.push_back(remaining);
+                            }
+                            
+                            for (size_t wi = 0; wi < wrapped_lines.size(); wi++) {
+                                if (first_line && wi == 0) {
+                                    if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_cb_line, COLOR_RESET, "|"); }
+                                    printf("%s%s%s%s\n", full_prefix, COLOR_CYAN, wrapped_lines[wi].c_str(), COLOR_RESET);
+                                    first_line = false;
+                                } else if (wi == 0) {
+                                    current_cb_line++;
+                                    if (config->show_line_numbers) { printf("%s%*d%s %s ", COLOR_DIM, max_digits, current_cb_line, COLOR_RESET, "|"); }
+                                    printf("%s%s%s%s\n", full_sub_prefix, COLOR_CYAN, wrapped_lines[wi].c_str(), COLOR_RESET);
+                                } else {
+                                    if (config->show_line_numbers) { printf("%*s %s ", max_digits, "", "|"); }
+                                    // Use dimmed continuation prefix: ↳
+                                    printf("%s%s↳ %s%s%s\n", full_sub_prefix, COLOR_DIM, COLOR_CYAN, wrapped_lines[wi].c_str(), COLOR_RESET);
+                                }
                             }
                         }
                     }
