@@ -435,7 +435,7 @@ public:
                     if (i < num_cols - 1) mid_border += _mm;
                     else mid_border += _rm;
                 }
-                output.push_back({mid_border, true});
+                output.push_back({mid_border, r == 0});
             }
         }
         
