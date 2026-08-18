@@ -1,0 +1,82 @@
+.TH MDTREE 1 "August 2026" "mdtree 1.0.0" "User Commands"
+.SH NAME
+mdtree \- Markdown Tree Visualizer
+.SH SYNOPSIS
+.B mdtree
+[\fIOPTIONS\fR] [\fIFILE\fR | \fIDIRECTORY\fR]
+.SH DESCRIPTION
+.B mdtree
+is a highly customizable command-line utility that reads Markdown files and outputs their structural representation, similar to how the `tree` command visualizes directory structures.
+.PP
+It provides an elegant, color-coded way to quickly review document hierarchies, view headings, content, lists, blockquotes, and tables without opening the file in an editor. Supports Markdown syntax including headings, unordered/ordered lists, task lists, blockquotes, fenced code blocks, tables, and horizontal rules.
+.SH OPTIONS
+.TP
+.BR \-d ", " \-\-depth " \fI<level>\fR"
+Limit the display to a certain heading level (1-6). A value of 7 shows all content.
+.TP
+.BR \-f ", " \-\-find " \fI<string>\fR"
+Search the file for the given string (case-sensitive) and show matched lines.
+.TP
+.BR \-i ", " \-\-case-insensitive
+Make the search case-insensitive when used with \-f or \-r.
+.TP
+.BR \-r ", " \-\-regex " \fI<regex>\fR"
+Search the file using a regular expression.
+.TP
+.BR \-I ", " \-\-ignore " \fI<regex>\fR"
+Ignore headings (and their children) matching the regex.
+.TP
+.BR \-H ", " \-\-headings-only
+Strictly show only headings (like a Table of Contents).
+.TP
+.BR \-F ", " \-\-focus " \fI<regex>\fR"
+Focus on the first heading matching the regex and only show its subtree.
+.TP
+.BR \-P ", " \-\-no-pager
+Disable automatic `less` paging.
+.TP
+.BR \-c ", " \-\-no-color
+Disable colored output.
+.TP
+.BR \-a ", " \-\-ascii
+Use ASCII characters for tree branches instead of box-drawing characters.
+.TP
+.BR \-s ", " \-\-stats
+Print statistics about the parsed files at the end.
+.TP
+.BR \-n ", " \-\-line-numbers
+Show original line numbers next to each tree item.
+.TP
+.BR \-w ", " \-\-no-warnings
+Suppress linter warnings at the end of the output.
+.TP
+.BR \-v ", " \-\-version
+Display version information.
+.TP
+.BR \-h ", " \-\-help
+Display help message and exit.
+.SH EXAMPLES
+.PP
+Show a table of contents (headings only):
+.RS
+mdtree -H README.md
+.RE
+.PP
+Focus on a specific API Endpoint section in a large document:
+.RS
+mdtree -F "API Endpoints" docs.md
+.RE
+.PP
+Find occurrences of a specific word or phrase:
+.RS
+mdtree -f "installation" manual.md
+.RE
+.PP
+Combine flags for advanced filtering:
+.RS
+mdtree -F "Installation" -d 3 README.md
+.RE
+.SH BUGS
+See the issue tracker on GitHub for open bugs or feature requests.
+.SH AUTHOR
+SilverSouls226 (https://github.com/SilverSouls226/mdtree)

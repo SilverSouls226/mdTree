@@ -23,3 +23,10 @@ install: $(TARGET)
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
 	cp $(TARGET) $(DESTDIR)$(PREFIX)/bin/$(TARGET)
 	chmod +x $(DESTDIR)$(PREFIX)/bin/$(TARGET)
+	mkdir -p $(DESTDIR)$(PREFIX)/share/man/man1
+	cp mdtree.1 $(DESTDIR)$(PREFIX)/share/man/man1/mdtree.1
+	chmod 644 $(DESTDIR)$(PREFIX)/share/man/man1/mdtree.1
+
+uninstall:
+	rm -f $(DESTDIR)$(PREFIX)/bin/$(TARGET)
+	rm -f $(DESTDIR)$(PREFIX)/share/man/man1/mdtree.1
