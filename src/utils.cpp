@@ -26,6 +26,12 @@ void display_help() {
     printf("                         1-6: Show headings up to the specified level (e.g., -d 2 shows H1 and H2).\n");
     printf("                         7:   Show all headings and all text content (default).\n");
     printf("  -f, --find <string>    Search the file for the given string (case-sensitive) and show only matched lines and their parent headings.\n");
+    printf("  -C, --checklist        Generate a checklist of all headings to an output file.\n");
+    printf("                         Usage forms:\n");
+    printf("                           mdtree <input> -C <output>\n");
+    printf("                           mdtree <input> -C           (auto-generates output name)\n");
+    printf("                           mdtree -C <output> <input>\n");
+    printf("                         Note: 'mdtree -C <file>' warns before overwriting <file>.\n");
     printf("  -i, --case-insensitive Make the search case-insensitive when used with -f or -r.\n");
     printf("  -r, --regex <regex>    Search the file using a regular expression.\n");
     printf("  -I, --ignore <regex>   Ignore headings (and their children) matching the regex.\n");

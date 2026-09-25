@@ -117,6 +117,8 @@ struct Config {
     bool show_hr = false;
     std::string focus_query = "";
     bool no_pager = false;
+    bool generate_checklist = false;
+    std::string checklist_output_file = "";
 };
 
 #endif

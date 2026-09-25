@@ -76,7 +76,10 @@ void process_directory(const char *dirpath, const char *global_prefix, Config *c
 }
 int main(int argc, char *argv[]) {
 
-    Config config = { MAX_AWK_LEVEL, false, false, "", false, false, false, false, false, false, "", false, "", false };
+    std::vector<std::string> orig_args;
+    for (int i = 0; i < argc; i++) orig_args.push_back(argv[i]);
+
+    Config config = { MAX_AWK_LEVEL, false, false, "", false, false, false, false, false, false, "", false, "", false, false, "" };
     int opt;
     int option_index = 0;
     static struct option long_options[] = {
@@ -96,10 +99,11 @@ int main(int argc, char *argv[]) {
         {"show-hr", no_argument, 0, 'R' },
         {"focus", required_argument, 0, 'F' },
         {"no-pager", no_argument, 0, 'P' },
+        {"checklist", no_argument, 0, 'C' },
         {0,      0,           0,   0  }
     };
 
-    while ((opt = getopt_long(argc, argv, "d:hnwvf:ir:casI:HRF:P", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "d:hnwvf:ir:casI:HRF:PC", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'd':
                 config.max_level_filter = atoi(optarg);
@@ -121,6 +125,9 @@ int main(int argc, char *argv[]) {
             case 'f':
                 config.search_query = optarg;
                 config.use_regex = false;
+                break;
+            case 'C':
+                config.generate_checklist = true;
                 break;
             case 'i':
                 config.case_insensitive_search = true;
@@ -168,11 +175,69 @@ int main(int argc, char *argv[]) {
     }
 
     const char *target_path = ".";
-    if (optind < argc) {
-        target_path = argv[optind];
+
+    if (config.generate_checklist) {
+        int positional_count = argc - optind;
+        if (positional_count == 0) {
+            target_path = ".";
+            config.checklist_output_file = "";
+        } else if (positional_count == 1) {
+            std::string A = argv[optind];
+            int f_pos = -1, a_pos = -1;
+            for (int i = 1; i < argc; i++) {
+                if (orig_args[i] == "--checklist") f_pos = i;
+                else if (orig_args[i].length() > 1 && orig_args[i][0] == '-' && orig_args[i][1] != '-' && orig_args[i].find('C') != std::string::npos) f_pos = i;
+                else if (orig_args[i] == A && a_pos == -1) a_pos = i;
+            }
+            if (f_pos != -1 && f_pos < a_pos) {
+                fprintf(stderr, "Warning: The format 'mdtree -C <file name>' means <file name> is both the input and output file, which will OVERWRITE the input file.\n");
+                fprintf(stderr, "Are you sure you want to overwrite '%s'? (y/n): ", A.c_str());
+                char c = getchar();
+                if (c != 'y' && c != 'Y') {
+                    fprintf(stderr, "Operation cancelled.\n");
+                    return EXIT_FAILURE;
+                }
+                target_path = argv[optind];
+                config.checklist_output_file = A;
+            } else {
+                target_path = argv[optind];
+                config.checklist_output_file = "";
+            }
+            optind++;
+        } else if (positional_count == 2) {
+            std::string A = argv[optind];
+            std::string B = argv[optind + 1];
+            int f_pos = -1, a_pos = -1, b_pos = -1;
+            for (int i = 1; i < argc; i++) {
+                if (orig_args[i] == "--checklist") f_pos = i;
+                else if (orig_args[i].length() > 1 && orig_args[i][0] == '-' && orig_args[i][1] != '-' && orig_args[i].find('C') != std::string::npos) f_pos = i;
+                else if (orig_args[i] == A && a_pos == -1) a_pos = i;
+                else if (orig_args[i] == B && b_pos == -1) b_pos = i;
+            }
+            if (f_pos != -1 && f_pos < a_pos && a_pos < b_pos) {
+                config.checklist_output_file = A;
+                target_path = argv[optind + 1];
+            } else if (f_pos != -1 && a_pos < f_pos && f_pos < b_pos) {
+                target_path = argv[optind];
+                config.checklist_output_file = B;
+            } else {
+                target_path = argv[optind];
+                config.checklist_output_file = B;
+            }
+            optind += 2;
+        } else {
+            fprintf(stderr, "Error: Too many arguments for checklist generation.\n");
+            display_help();
+            return EXIT_FAILURE;
+        }
+    } else {
+        if (optind < argc) {
+            target_path = argv[optind];
+            optind++;
+        }
     }
 
-    if (optind < argc - 1) {
+    if (optind < argc) {
         fprintf(stderr, "Error: Too many arguments provided.\n");
         fprintf(stderr, "If you are trying to use a long flag like --find, make sure to use two dashes (--).\n");
         display_help();

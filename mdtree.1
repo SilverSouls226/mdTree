@@ -17,6 +17,11 @@ Limit the display to a certain heading level (1-6). A value of 7 shows all conte
 .BR \-f ", " \-\-find " \fI<string>\fR"
 Search the file for the given string (case-sensitive) and show matched lines.
 .TP
+.BR \-C ", " \-\-checklist
+Generate a checklist of all headings to an output file.
+Supports forms: mdtree <input> -C <output>, mdtree <input> -C, or mdtree -C <output> <input>.
+Note: 'mdtree -C <file>' warns before overwriting <file> with the checklist.
+.TP
 .BR \-i ", " \-\-case-insensitive
 Make the search case-insensitive when used with \-f or \-r.
 .TP
