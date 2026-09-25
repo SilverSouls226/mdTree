@@ -63,7 +63,9 @@ void process_directory(const char *dirpath, const char *global_prefix, Config *c
         snprintf(item_prefix, sizeof(item_prefix), "%s%s", global_prefix, is_last ? (config->ascii_tree ? "`-- " : "└── ") : (config->ascii_tree ? "|-- " : "├── "));
         
         if (S_ISDIR(st.st_mode)) {
-            printf("%s%s\n", item_prefix, namelist[i]->d_name);
+            if (!config->generate_checklist) {
+                printf("%s%s\n", item_prefix, namelist[i]->d_name);
+            }
             process_directory(path, next_prefix, config);
         } else {
             process_markdown_file(path, next_prefix, config, item_prefix, namelist[i]->d_name);
@@ -79,7 +81,7 @@ int main(int argc, char *argv[]) {
     std::vector<std::string> orig_args;
     for (int i = 0; i < argc; i++) orig_args.push_back(argv[i]);
 
-    Config config = { MAX_AWK_LEVEL, false, false, "", false, false, false, false, false, false, "", false, "", false, false, "" };
+    Config config = { MAX_AWK_LEVEL, false, false, "", false, false, false, false, false, false, "", false, "", false, false, "", nullptr };
     int opt;
     int option_index = 0;
     static struct option long_options[] = {
@@ -251,6 +253,45 @@ int main(int argc, char *argv[]) {
         perror("Error accessing path");
         return EXIT_FAILURE;
     }
+
+    if (config.generate_checklist) {
+        std::string out_name = config.checklist_output_file;
+        if (out_name.empty()) {
+            if (S_ISDIR(st.st_mode)) {
+                std::string base_name = target_path;
+                if (base_name == ".") {
+                    char cwd[1024];
+                    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+                        base_name = cwd;
+                    }
+                }
+                size_t slash_pos = base_name.find_last_of('/');
+                if (slash_pos != std::string::npos && slash_pos < base_name.length() - 1) {
+                    base_name = base_name.substr(slash_pos + 1);
+                }
+                out_name = base_name + " - Checklist.md";
+            } else {
+                std::string base_name = target_path;
+                size_t slash_pos = base_name.find_last_of('/');
+                if (slash_pos != std::string::npos) base_name = base_name.substr(slash_pos + 1);
+                size_t dot_pos = base_name.find_last_of('.');
+                if (dot_pos != std::string::npos && dot_pos > 0) {
+                    out_name = base_name.substr(0, dot_pos) + " - Checklist" + base_name.substr(dot_pos);
+                } else {
+                    out_name = base_name + " - Checklist.md";
+                }
+            }
+        }
+        config.checklist_fp = fopen(out_name.c_str(), "w");
+        if (config.checklist_fp) {
+            fprintf(config.checklist_fp, "# Topic Checklist\n\n");
+            config.checklist_output_file = out_name;
+        } else {
+            perror("Error creating checklist file");
+            return EXIT_FAILURE;
+        }
+        config.no_pager = true; // Disable pager when generating checklist
+    }
     
     bool use_pager = false;
     FILE *temp_out = NULL;
@@ -268,12 +309,20 @@ int main(int argc, char *argv[]) {
     }
 
     if (S_ISDIR(st.st_mode)) {
-        printf("%s\n", target_path);
+        if (!config.generate_checklist) {
+            printf("%s\n", target_path);
+        }
         process_directory(target_path, "", &config);
     } else {
         process_markdown_file(target_path, "", &config, "", target_path);
     }
     
+    if (config.generate_checklist && config.checklist_fp) {
+        fclose(config.checklist_fp);
+        printf("Checklist generated at: %s\n", config.checklist_output_file.c_str());
+        return EXIT_SUCCESS;
+    }
+
     if (config.show_stats) {
         printf("\n\n────────────────────────────── Statistics ──────────────────────────────\n");
         printf("Files parsed:      %d\n", g_stats.files_parsed);

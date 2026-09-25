@@ -119,6 +119,7 @@ struct Config {
     bool no_pager = false;
     bool generate_checklist = false;
     std::string checklist_output_file = "";
+    FILE *checklist_fp = nullptr;
 };
 
 #endif

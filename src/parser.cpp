@@ -454,20 +454,8 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
     }
 
     if (config->generate_checklist) {
-        std::string out_file = config->checklist_output_file;
-        if (out_file.empty()) {
-            std::string base_name = filename ? filename : "output";
-            size_t dot_pos = base_name.find_last_of('.');
-            if (dot_pos != std::string::npos && dot_pos > 0) {
-                out_file = base_name.substr(0, dot_pos) + " - Checklist" + base_name.substr(dot_pos);
-            } else {
-                out_file = base_name + " - Checklist.md";
-            }
-        }
-
-        FILE *out_fp = fopen(out_file.c_str(), "w");
-        if (out_fp) {
-            fprintf(out_fp, "# Topic Checklist\n\n");
+        if (config->checklist_fp) {
+            fprintf(config->checklist_fp, "## %s\n\n", filename ? filename : "File");
             for (size_t i = 0; i < lines_data.size(); i++) {
                 if (lines_data[i].type == TYPE_HEADING) {
                     int level = lines_data[i].level;
@@ -475,13 +463,10 @@ bool process_markdown_file(const char *md_file_path, const char *global_prefix, 
                     for (int j = 1; j < level; j++) {
                         indent += "  ";
                     }
-                    fprintf(out_fp, "%s- [ ] %s\n", indent.c_str(), lines_data[i].text.c_str());
+                    fprintf(config->checklist_fp, "%s- [ ] %s\n", indent.c_str(), lines_data[i].text.c_str());
                 }
             }
-            fclose(out_fp);
-            printf("Checklist generated at: %s\n", out_file.c_str());
-        } else {
-            perror("Error creating checklist file");
+            fprintf(config->checklist_fp, "\n");
         }
         cleanup();
         return true;
